@@ -65,7 +65,7 @@ pub struct GenPerturbElementSet {
     /// Classification (`U` = Unclassified, `C` = Classified, `S` = Secret)
     pub classification: char,
 
-    /// International designator in `YYYY-NNNP` form (launch year, launch number, piece)
+    /// International designator in `Y-NP` form (launch year (4+ digits), launch number (3+ digits), piece (1+ characters))
     pub international_designator: String,
 
     /// Epoch UTC datetime
@@ -141,6 +141,9 @@ pub enum GpError {
 
     /// A TLE data line is not 68 characters before the checksum
     InvalidTLELine,
+
+    /// TLE international designator launch number or piece exceeds 3 characters
+    InvalidTLEInternationalDesignator,
 
     /// An OMM field cannot be parsed as the requested type
     InvalidOmmField,
@@ -863,34 +866,46 @@ fn format_tle_catalog_number(catalog: i32) -> Result<String, GpError> {
 /// Format an international designator for a TLE
 ///
 /// Converts YYYY-NNNP form back to the 8-character TLE field YYNNNPPP.
-/// Missing designators are written as eight spaces.
+/// Missing designators are written as eight spaces. The TLE field allows
+/// a 3-digit launch number and a 3-character piece; longer values stored
+/// on the GP cannot be written as a TLE.
 ///
 /// # Arguments
 /// * `intl` - The international designator stored on the GP
 ///
 /// # Returns
-/// * An 8-character international designator field
-fn format_tle_intl_des(intl: &str) -> String {
+/// * `Ok(String)` - An 8-character international designator field
+/// * `Err(GpError)` - If the designator cannot be written as a TLE field
+///
+/// # Errors
+/// * [`GpError::InvalidTLEInternationalDesignator`] - If the launch number or piece exceeds 3 characters
+fn format_tle_intl_des(intl: &str) -> Result<String, GpError> {
     let intl = intl.trim();
     if intl.is_empty() {
         // Handle case where international designator is not present
-        return "        ".to_string();
+        return Ok("        ".to_string());
     }
 
     // Collapse YYYY-NNNP back to the two-digit TLE year plus the launch piece
-    let mut field = if let Some((year_str, rest)) = intl.split_once('-') {
+    let field = if let Some((year_str, rest)) = intl.split_once('-') {
+        // TLE allows 3 launch-number digits and 3 piece characters
+        let launch_len = rest.bytes().take_while(u8::is_ascii_digit).count();
+        let part_code = &rest[launch_len..];
+        if launch_len > 3 || part_code.len() > 3 {
+            return Err(GpError::InvalidTLEInternationalDesignator);
+        }
+
         let year = year_str.parse::<i32>().unwrap_or(0);
         let yy = ((year % 100) + 100) % 100;
         format!("{:02}{}", yy, rest)
+    } else if intl.len() > 8 {
+        return Err(GpError::InvalidTLEInternationalDesignator);
     } else {
         intl.to_string()
     };
 
     // TLE international designator field is 8 characters, left-justified
-    if field.len() > 8 {
-        field.truncate(8);
-    }
-    format!("{:<8}", field)
+    Ok(format!("{:<8}", field))
 }
 
 /// Format a TLE epoch from a UTC datetime
@@ -1075,7 +1090,7 @@ fn format_tle_line1(gp: &GenPerturbElementSet) -> Result<String, GpError> {
     };
 
     // International designator
-    let intl_des = format_tle_intl_des(&gp.international_designator);
+    let intl_des = format_tle_intl_des(&gp.international_designator)?;
 
     // Epoch year and day of year
     let epoch = format_tle_epoch(&gp.epoch_datetime)?;
@@ -1211,6 +1226,7 @@ fn gp_to_tle(gp: &GenPerturbElementSet) -> Result<String, GpError> {
 /// # Errors
 /// * [`GpError::InvalidTLECatalogNumber`] - If a catalog number is negative or greater than 339999
 /// * [`GpError::InvalidTLEDateTime`] - If an epoch year is before 1957 or after 2056
+/// * [`GpError::InvalidTLEInternationalDesignator`] - If a launch number or piece exceeds 3 characters
 /// * [`GpError::InvalidTLELine`] - If a formatted TLE data line is not 68 characters before the checksum
 ///
 /// # Examples
@@ -1264,6 +1280,7 @@ pub fn to_tle_string(sgp4s: &[Sgp4]) -> Result<String, GpError> {
 /// # Errors
 /// * [`GpError::InvalidTLECatalogNumber`] - If a catalog number is negative or greater than 339999
 /// * [`GpError::InvalidTLEDateTime`] - If an epoch year is before 1957 or after 2056
+/// * [`GpError::InvalidTLEInternationalDesignator`] - If a launch number or piece exceeds 3 characters
 /// * [`GpError::InvalidTLELine`] - If a formatted TLE data line is not 68 characters before the checksum
 /// * [`GpError::Io`] - If the file cannot be written
 ///
@@ -3447,6 +3464,25 @@ mod tests {
             Ok(_) => panic!("expected InvalidTLELine"),
         };
         assert_eq!(err, GpError::InvalidTLELine);
+    }
+
+    #[test]
+    fn test_invalid_tle_international_designator() {
+        let err = match format_tle_intl_des("2026-1234A") {
+            Err(err) => err,
+            Ok(_) => panic!("expected InvalidTLEInternationalDesignator"),
+        };
+        assert_eq!(err, GpError::InvalidTLEInternationalDesignator);
+
+        let err = match format_tle_intl_des("2026-106ABCD") {
+            Err(err) => err,
+            Ok(_) => panic!("expected InvalidTLEInternationalDesignator"),
+        };
+        assert_eq!(err, GpError::InvalidTLEInternationalDesignator);
+
+        assert_eq!(format_tle_intl_des("1998-067A").unwrap(), "98067A  ");
+        assert_eq!(format_tle_intl_des("2025-286AD").unwrap(), "25286AD ");
+        assert_eq!(format_tle_intl_des("2025-001ABC").unwrap(), "25001ABC");
     }
 
     #[test]
