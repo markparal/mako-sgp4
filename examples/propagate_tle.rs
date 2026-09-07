@@ -1,4 +1,4 @@
-//! Example demonstrating how to propagate a TLE using the Mako-SGP4 crate.
+//! Example demonstrating how to propagate a TLE using the mako-sgp4 crate.
 
 // ------------------
 // External Libraries

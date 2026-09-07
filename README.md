@@ -1,23 +1,23 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/markparal/MAKO-SGP4/HEAD/assets/logo_dark.png" alt="MAKO-SGP4 logo" width="240">
+  <img src="https://raw.githubusercontent.com/markparal/mako-sgp4/HEAD/assets/logo_dark.png" alt="mako-sgp4 logo" width="240">
 </p>
 
-# MAKO-SGP4
+# mako-sgp4
 
-[![Build status](https://github.com/markparal/MAKO-SGP4/actions/workflows/ci.yml/badge.svg)](https://github.com/markparal/MAKO-SGP4/actions/workflows/ci.yml)
+[![Build status](https://github.com/markparal/mako-sgp4/actions/workflows/ci.yml/badge.svg)](https://github.com/markparal/mako-sgp4/actions/workflows/ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/mako-sgp4.svg)](https://crates.io/crates/mako-sgp4)
 [![Documentation](https://docs.rs/mako-sgp4/badge.svg)](https://docs.rs/mako-sgp4)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A Rust crate to parse and propagate General Perturbation Element Sets (GPs) using Simplified Perturbations Models (SGP4 / SDP4). Both Two-Line Elements (TLEs) and Orbit Mean-Elements Messages (OMMs) are supported. This code is implemented using the theory and equations found in *History of Analytical Orbit Modeling in the U.S. Space Surveillance System* by Hoots et al. Practical implementation adjustments were made based on *Revisiting Spacetrack Report #3: Rev 3* by Vallado et al.
 
-The name MAKO-SGP4 pays tribute to the Shortfin Mako Shark, the fastest shark species. The speed and efficiency of the SGP4 propagator make this an apt name.
+The name mako-sgp4 pays tribute to the Shortfin Mako Shark, the fastest shark species. The speed and efficiency of the SGP4 propagator make this an apt name.
 
 ## Accuracy
 
 The SGP4 propagator is a mean orbital elements propagator. At any point in time, its accuracy to the true position of an orbiting body is typically on the order of hundreds of meters to kilometers. Thus, it is not intended for high-precision operations.
 
-MAKO-SGP4 is verified against the standard Vallado test cases (found in `test/`). In all cases, it agrees with Vallado's SGP4 propagator to within 1 meter.
+mako-sgp4 is verified against the standard Vallado test cases (found in `test/`). In all cases, it agrees with Vallado's SGP4 propagator to within 1 meter.
 
 ## Documentation
 
@@ -36,7 +36,7 @@ cargo doc --no-deps --open
 
 ## Usage
 
-Add MAKO-SGP4 to your projects:
+Add mako-sgp4 to your projects:
 
 ```bash
 cargo add mako-sgp4

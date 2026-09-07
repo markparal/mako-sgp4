@@ -1,4 +1,4 @@
-//! Example demonstrating how to export a TLE to OMM-CSV, import it, and propagate to epoch using the Mako-SGP4 crate.
+//! Example demonstrating how to export a TLE to OMM-CSV, import it, and propagate to epoch using the mako-sgp4 crate.
 
 // ------------------
 // External Libraries

@@ -1,4 +1,4 @@
-//! MAKO-SGP4: parse and propagate general perturbation element sets with SGP4/SDP4.
+//! mako-sgp4: parse and propagate general perturbation element sets with SGP4/SDP4.
 //!
 //! # Examples
 //! ```rust

@@ -1,4 +1,4 @@
-//! Example demonstrating how to export a TLE to a file, import it, and propagate it using the Mako-SGP4 crate.
+//! Example demonstrating how to export a TLE to a file, import it, and propagate it using the mako-sgp4 crate.
 
 // ------------------
 // External Libraries

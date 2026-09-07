@@ -1,4 +1,4 @@
-//! Example demonstrating how to propagate an OMM-KVN to a desired datetime using the Mako-SGP4 crate.
+//! Example demonstrating how to propagate an OMM-KVN to a desired datetime using the mako-sgp4 crate.
 
 // ------------------
 // External Libraries

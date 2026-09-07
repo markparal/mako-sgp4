@@ -8,8 +8,8 @@ authors = [
 ]
 description = "Theory-based SGP4 propagator for TLEs and OMMs"
 readme = "README.md"
-homepage = "https://github.com/markparal/MAKO-SGP4"
-repository = "https://github.com/markparal/MAKO-SGP4"
+homepage = "https://github.com/markparal/mako-sgp4"
+repository = "https://github.com/markparal/mako-sgp4"
 license = "MIT"
 keywords = [
     "satellite",
