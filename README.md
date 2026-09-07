@@ -103,7 +103,8 @@ cargo add mako-sgp4 --no-default-features --features json,csv # Exclude XML
 ```
 
 ## Future Work
-- Write math spec
+- Add additional test cases
+- Finish math spec
 - Fit state data to GP
 - Python wrapper
 
