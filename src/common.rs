@@ -56,9 +56,6 @@ pub struct Wgs {
 
     /// The square root of the standard gravitational parameter \[Earth radii^1.5 / min\]
     pub ke: f64,
-
-    /// The inverse of ke \[min / Earth radii^1.5\]
-    pub tumin: f64,
 }
 
 /// Satellite state vector
@@ -161,7 +158,6 @@ pub enum CoordinateFrame {
 /// - `j4`: -0.00000165597 - fourth zonal harmonic
 /// - `k4`: 0.00000062098875 - `-3/8 * j4` \[Earth radii^4\]
 /// - `ke`: 0.07436691613317 - square root of `mu` \[Earth radii^1.5 / min\]
-/// - `tumin`: 13.44683969695931 - inverse of `ke` \[min / Earth radii^1.5\]
 ///
 /// # Examples
 /// ```rust
@@ -182,7 +178,6 @@ pub const WGS72: Wgs = Wgs {
     j4: -0.00000165597,
     k4: 0.00000062098875,
     ke: 0.07436691613317,
-    tumin: 13.44683969695931,
 };
 
 /// Fundamental and derived constants for WGS-84
@@ -197,7 +192,6 @@ pub const WGS72: Wgs = Wgs {
 /// - `j4`: -0.00000161098761 - fourth zonal harmonic
 /// - `k4`: 0.0000006041203538 - `-3/8 * j4` \[Earth radii^4\]
 /// - `ke`: 0.07436685316871 - square root of `mu` \[Earth radii^1.5 / min\]
-/// - `tumin`: 13.44685108204498 - inverse of `ke` \[min / Earth radii^1.5\]
 ///
 /// # Examples
 /// ```rust
@@ -219,7 +213,6 @@ pub const WGS84: Wgs = Wgs {
     j4: -0.00000161098761,
     k4: 0.0000006041203538,
     ke: 0.07436685316871,
-    tumin: 13.44685108204498,
 };
 
 // ---------

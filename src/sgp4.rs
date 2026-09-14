@@ -760,7 +760,7 @@ fn init_atm_effects(
     // Calculate atmospheric drag parameters
     let zeta = 1. / (brouwer0.a - s);
     let eta = brouwer0.a * brouwer0.e * zeta;
-    let psisq = (1. - eta.powi(2)).abs(); // abs is used to handle the case when eta > 1 (sub-orbital / decayed orbits)
+    let psisq = (1. - eta.powi(2)).abs(); // Vallado uses abs to handle the case when eta > 1 (sub-orbital / decayed orbits)
 
     let c2_1 = (q0 - s).powi(4) * zeta.powi(4) * brouwer0.n * psisq.powf(-3.5);
     let c2_2 = brouwer0.a
