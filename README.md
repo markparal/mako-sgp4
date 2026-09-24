@@ -17,7 +17,7 @@ The name mako-sgp4 pays tribute to the Shortfin Mako Shark, the fastest shark sp
 
 The SGP4 propagator is a mean orbital elements propagator. At any point in time, its accuracy to the true position of an orbiting body is typically on the order of hundreds of meters to kilometers. Thus, it is not intended for high-precision operations.
 
-mako-sgp4 is verified against the standard Vallado test cases (found in `test/`). In all cases, it agrees with Vallado's SGP4 propagator to within 1 meter.
+mako-sgp4 is verified against the standard Vallado test cases as well as custom test cases (found in `test/`). In all propagation cases, mako-sgp4 agrees with Vallado's SGP4 propagator to within 1 meter.
 
 ## Documentation
 

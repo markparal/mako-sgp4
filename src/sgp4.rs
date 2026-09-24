@@ -2063,7 +2063,7 @@ fn whole_day_euler_maclaurin_step(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gp::from_tle_string;
+    use crate::gp::{from_omm_kvn_string, from_tle_string};
     use crate::time::Timezone;
     use serde::Deserialize;
     use std::collections::HashMap;
@@ -2096,8 +2096,8 @@ mod tests {
         exception: bool,
     }
 
-    /// One ephemeris row: time since epoch [min], TEME position [km], velocity [km/s],
-    /// and the UTC calendar time (Vallado stamp, or the TLE epoch when the stamp is absent).
+    // One ephemeris row: minutes from epoch, TEME position and velocity, and UTC time.
+    // A row without a calendar stamp uses the TLE epoch.
     struct EphemRow {
         t_mins: f64,
         rx: f64,
@@ -2109,10 +2109,17 @@ mod tests {
         datetime: DateTime,
     }
 
-    /// Parse the optional Vallado UTC stamp after the 7 state columns.
+    /// Parse the optional Vallado UTC stamp after the state columns
     ///
-    /// Stamps look like `2000  6 28  0:50:19.733571`. Fortran-style spacing can
-    /// split the time across tokens (`10:20: 1.494254`, `9: 0: 0.000282`).
+    /// The stamp follows the seven ephemeris numbers. Fortran spacing can split
+    /// the clock time across tokens.
+    ///
+    /// # Arguments
+    /// * `cols` - Whitespace-separated fields from one ephemeris line
+    ///
+    /// # Returns
+    /// * `Some(DateTime)` - Parsed UTC stamp
+    /// * `None` - If the line has no stamp or the stamp cannot be parsed
     fn parse_vallado_datetime(cols: &[&str]) -> Option<DateTime> {
         if cols.len() < 11 {
             return None;
@@ -2142,9 +2149,20 @@ mod tests {
         })
     }
 
-    /// Parse the whitespace-delimited Vallado ephem block into rows.
-    /// Lines are `t_mins rx ry rz vx vy vz` with an optional trailing calendar stamp.
-    /// Rows without a stamp use `epoch` (the TLE epoch, typically `t_mins = 0`).
+    /// Parse a Vallado ephemeris block into rows
+    ///
+    /// Each line holds minutes from epoch, TEME position in km, and TEME velocity
+    /// in km/s. A line without a calendar stamp uses the TLE epoch.
+    ///
+    /// # Arguments
+    /// * `ephem` - Ephemeris text from the test case
+    /// * `epoch` - TLE epoch, used when a line has no calendar stamp
+    ///
+    /// # Returns
+    /// * `Vec<EphemRow>` - Parsed rows
+    ///
+    /// # Panics
+    /// * If a line has a calendar stamp that cannot be parsed
     fn parse_vallado_ephem(ephem: &str, epoch: DateTime) -> Vec<EphemRow> {
         ephem
             .lines()
@@ -2174,12 +2192,24 @@ mod tests {
             .collect()
     }
 
-    /// Shift a parsed UTC stamp so it represents exactly `t_mins` after epoch.
+    /// Shift a UTC stamp so it matches an exact minute offset
     ///
-    /// Vallado prints calendar time with limited precision. The reference state
-    /// is at exact `t_mins`, so a few tens of microseconds in the stamp is enough
-    /// to miss 1 m on a near-decay orbit. The stamp must still be within 1 ms of
-    /// `t_mins` or the row is treated as a parse error.
+    /// Vallado prints the calendar time with limited precision. The reference
+    /// state is at exact `t_mins`, and a fraction of a millisecond is enough to
+    /// miss 1 m on a near-decay orbit. The printed stamp must still be within
+    /// 1 ms of `t_mins`.
+    ///
+    /// # Arguments
+    /// * `datetime` - Parsed Vallado calendar stamp
+    /// * `jd0` - Integer Julian day of the TLE epoch
+    /// * `jdfrac0` - Fractional Julian day of the TLE epoch
+    /// * `t_mins` - Minutes from epoch for this row
+    ///
+    /// # Returns
+    /// * `DateTime` - Stamp adjusted onto `t_mins`
+    ///
+    /// # Panics
+    /// * If the stamp is more than 1 ms from `t_mins`
     fn align_datetime_to_t_mins(
         datetime: DateTime,
         jd0: f64,
@@ -2199,9 +2229,22 @@ mod tests {
         }
     }
 
-    /// Sub-meter agreement with Vallado reference ephemerides [km] / [km/s].
+    // Sub-meter agreement with Vallado reference ephemerides, in km and km/s.
     const VALLADO_STATE_TOL_KM: f64 = 1e-3;
 
+    /// Compare a propagated state with one Vallado ephemeris row
+    ///
+    /// Position and velocity must agree to within `VALLADO_STATE_TOL_KM`.
+    ///
+    /// # Arguments
+    /// * `key` - TOML case key, included in the failure message
+    /// * `name` - Case description, included in the failure message
+    /// * `t_mins` - Minutes from epoch for this row
+    /// * `got` - State returned by mako-sgp4
+    /// * `row` - Reference ephemeris row
+    ///
+    /// # Panics
+    /// * If any component differs by at least the Vallado tolerance
     fn assert_state_near(key: &str, name: &str, t_mins: f64, got: &StateVector, row: &EphemRow) {
         let checks = [
             ("Position x", got.r_x, row.rx),
@@ -2219,6 +2262,13 @@ mod tests {
         }
     }
 
+    /// Build an initialized SGP4 model from the ISS test TLE
+    ///
+    /// # Returns
+    /// * `Sgp4` - Propagator for the ISS element set
+    ///
+    /// # Panics
+    /// * If the TLE does not parse
     fn iss_sgp4() -> Sgp4 {
         from_tle_string(
             "\
@@ -2232,6 +2282,10 @@ mod tests {
         .expect("ISS TLE should yield one propagator")
     }
 
+    /// Build the J2000 epoch as a UTC datetime
+    ///
+    /// # Returns
+    /// * `DateTime` - 2000-01-01 12:00:00 UTC
     fn utc_j2000() -> DateTime {
         DateTime {
             year: 2000,
@@ -2244,6 +2298,12 @@ mod tests {
         }
     }
 
+    /// Reject a non-UTC or pre-Gregorian propagation time
+    ///
+    /// Checks both initialization and `sgp4_prop_datetime`.
+    ///
+    /// # Panics
+    /// * If either path accepts an invalid datetime
     #[test]
     fn test_invalid_date_time() {
         let mut gp = GenPerturbElementSet {
@@ -2286,6 +2346,12 @@ mod tests {
         ));
     }
 
+    /// Reject a mean motion that is not positive
+    ///
+    /// Checks both initialization and `sgp4_prop_delta`.
+    ///
+    /// # Panics
+    /// * If either path accepts a non-positive mean motion
     #[test]
     fn test_invalid_mean_motion() {
         let gp = GenPerturbElementSet {
@@ -2306,6 +2372,10 @@ mod tests {
         ));
     }
 
+    /// Reject a mean eccentricity outside 0 to 1
+    ///
+    /// # Panics
+    /// * If propagation accepts an eccentricity of 1.5 or -0.5
     #[test]
     fn test_invalid_mean_eccentricity() {
         let mut sgp4 = iss_sgp4();
@@ -2322,6 +2392,10 @@ mod tests {
         ));
     }
 
+    /// Reject a deep-space perturbed eccentricity outside 0 to 1
+    ///
+    /// # Panics
+    /// * If propagation accepts the constructed lunar terms
     #[test]
     fn test_invalid_perturbed_eccentricity() {
         let mut sgp4 = iss_sgp4();
@@ -2338,6 +2412,10 @@ mod tests {
         ));
     }
 
+    /// Reject a semilatus rectum that is not positive
+    ///
+    /// # Panics
+    /// * If propagation accepts an eccentricity of 0.9999 on the ISS model
     #[test]
     fn test_invalid_semilatus_rectum() {
         let mut sgp4 = iss_sgp4();
@@ -2349,6 +2427,10 @@ mod tests {
         ));
     }
 
+    /// Reject a decayed satellite
+    ///
+    /// # Panics
+    /// * If propagation accepts a mean motion of 1 rad/min on the ISS model
     #[test]
     fn test_satellite_decayed() {
         let mut sgp4 = iss_sgp4();
@@ -2360,6 +2442,13 @@ mod tests {
         ));
     }
 
+    /// Compare propagation with the Vallado reference ephemerides
+    ///
+    /// Each non-exception TLE is propagated with both minutes from epoch and
+    /// the printed UTC stamp. Exception cases must fail to parse.
+    ///
+    /// # Panics
+    /// * If a case fails to parse, fails to propagate, or misses the tolerance
     #[test]
     fn test_sgp4_vallado_cases() {
         let content = std::fs::read_to_string("test/vallado_cases.toml")
@@ -2408,6 +2497,10 @@ mod tests {
         }
     }
 
+    /// Parse compact, split, and missing Vallado calendar stamps
+    ///
+    /// # Panics
+    /// * If a stamp is parsed as the wrong calendar time
     #[test]
     fn test_parse_vallado_datetime() {
         let epoch = DateTime {
@@ -2450,5 +2543,211 @@ mod tests {
 
         let epoch_row = &parse_vallado_ephem(no_stamp, epoch)[0];
         assert_eq!(epoch_row.datetime, epoch);
+    }
+
+    // -------------------------------------------------------
+    // Structs for deserializing python-sgp4 test cases
+    // -------------------------------------------------------
+
+    // Root of test/python-sgp4_cases.toml. Each entry is one OMM and its states.
+    #[derive(Deserialize)]
+    struct PythonSgp4Cases {
+        test: HashMap<String, PythonSgp4Case>,
+    }
+
+    // One KVN OMM and parallel sample arrays.
+    // time_delta is minutes from epoch. time_utc is the matching UTC timestamp.
+    // Position is TEME meters. Velocity is TEME meters per second.
+    #[derive(Deserialize)]
+    struct PythonSgp4Case {
+        name: String,
+        omm: String,
+        time_delta: Vec<f64>,
+        time_utc: Vec<String>,
+        x_teme_m: Vec<f64>,
+        y_teme_m: Vec<f64>,
+        z_teme_m: Vec<f64>,
+        vx_teme_m_per_s: Vec<f64>,
+        vy_teme_m_per_s: Vec<f64>,
+        vz_teme_m_per_s: Vec<f64>,
+    }
+
+    // A position component passes when it differs by less than 1 meter.
+    const PYTHON_SGP4_POS_TOL_M: f64 = 1.0;
+
+    // A velocity component passes when it differs by less than 1 meter per second.
+    const PYTHON_SGP4_VEL_TOL_M_S: f64 = 1.0;
+
+    /// Parse an ISO-8601 UTC timestamp with a fractional second
+    ///
+    /// The calendar date and the clock time are separated by `T`. Fractional
+    /// seconds stay in the `second` field.
+    ///
+    /// # Arguments
+    /// * `text` - Timestamp text from a python-sgp4 case
+    ///
+    /// # Returns
+    /// * `DateTime` - Parsed UTC timestamp
+    ///
+    /// # Panics
+    /// * If the timestamp is missing a date, a time, or a numeric field
+    fn parse_iso_utc(text: &str) -> DateTime {
+        // Split the calendar date from the clock time
+        let (date, time) = text
+            .split_once('T')
+            .unwrap_or_else(|| panic!("UTC timestamp missing T: {text}"));
+        let date_parts: Vec<&str> = date.split('-').collect();
+        let time_parts: Vec<&str> = time.split(':').collect();
+        assert!(
+            date_parts.len() == 3 && time_parts.len() == 3,
+            "UTC timestamp has the wrong shape: {text}"
+        );
+
+        // Build the UTC datetime. Fractional seconds stay in `second`.
+        DateTime {
+            year: date_parts[0].parse().expect("year"),
+            month: date_parts[1].parse().expect("month"),
+            day: date_parts[2].parse().expect("day"),
+            hour: time_parts[0].parse().expect("hour"),
+            minute: time_parts[1].parse().expect("minute"),
+            second: time_parts[2].parse().expect("second"),
+            timezone: Timezone::UTC,
+        }
+    }
+
+    /// Compare one propagated state with a python-sgp4 reference sample
+    ///
+    /// mako-sgp4 reports kilometers, so each component is scaled to meters
+    /// before the tolerance check.
+    ///
+    /// # Arguments
+    /// * `key` - TOML case key, included in the failure message
+    /// * `name` - Case description, included in the failure message
+    /// * `path` - Which propagator entry point was used, `delta` or `utc`
+    /// * `t_mins` - Minutes from epoch for this sample
+    /// * `got` - State returned by mako-sgp4
+    /// * `expected` - Reference position in meters and velocity in meters per second
+    ///
+    /// # Panics
+    /// * If any component differs by at least the python-sgp4 tolerance
+    fn assert_python_sgp4_state(
+        key: &str,
+        name: &str,
+        path: &str,
+        t_mins: f64,
+        got: &StateVector,
+        expected: &[f64; 6],
+    ) {
+        // Scale mako kilometers into the reference meter units
+        let checks = [
+            (
+                "Position x",
+                got.r_x * 1000.0,
+                expected[0],
+                PYTHON_SGP4_POS_TOL_M,
+            ),
+            (
+                "Position y",
+                got.r_y * 1000.0,
+                expected[1],
+                PYTHON_SGP4_POS_TOL_M,
+            ),
+            (
+                "Position z",
+                got.r_z * 1000.0,
+                expected[2],
+                PYTHON_SGP4_POS_TOL_M,
+            ),
+            (
+                "Velocity x",
+                got.v_x * 1000.0,
+                expected[3],
+                PYTHON_SGP4_VEL_TOL_M_S,
+            ),
+            (
+                "Velocity y",
+                got.v_y * 1000.0,
+                expected[4],
+                PYTHON_SGP4_VEL_TOL_M_S,
+            ),
+            (
+                "Velocity z",
+                got.v_z * 1000.0,
+                expected[5],
+                PYTHON_SGP4_VEL_TOL_M_S,
+            ),
+        ];
+        for (label, value, reference, tol) in checks {
+            assert!(
+                (value - reference).abs() < tol,
+                "{key}: {name} {path}\n- {label} mismatch {value} vs {reference} (t_mins = {t_mins})"
+            );
+        }
+    }
+
+    /// Compare OMM propagation with the python-sgp4 reference states
+    ///
+    /// Each case is propagated with both minutes from epoch and the stored
+    /// UTC timestamp.
+    ///
+    /// # Panics
+    /// * If an OMM fails to parse, a sample fails to propagate, or a state misses the tolerance
+    #[test]
+    fn test_sgp4_python_sgp4_cases() {
+        // Load and parse the reference file
+        let content = std::fs::read_to_string("test/python-sgp4_cases.toml")
+            .expect("could not read test/python-sgp4_cases.toml");
+        let cases: PythonSgp4Cases =
+            from_str(&content).expect("could not parse test/python-sgp4_cases.toml");
+
+        // Stable order so a failure names the same case on every run
+        let mut keys: Vec<&String> = cases.test.keys().collect();
+        keys.sort();
+
+        for key in keys {
+            let case = &cases.test[key];
+            let n = case.time_delta.len();
+
+            // Every sample array must describe the same set of times
+            assert!(n > 0, "{key}: no propagation samples");
+            assert_eq!(case.time_utc.len(), n, "{key}: time_utc length");
+            assert_eq!(case.x_teme_m.len(), n, "{key}: x_teme_m length");
+            assert_eq!(case.y_teme_m.len(), n, "{key}: y_teme_m length");
+            assert_eq!(case.z_teme_m.len(), n, "{key}: z_teme_m length");
+            assert_eq!(case.vx_teme_m_per_s.len(), n, "{key}: vx length");
+            assert_eq!(case.vy_teme_m_per_s.len(), n, "{key}: vy length");
+            assert_eq!(case.vz_teme_m_per_s.len(), n, "{key}: vz length");
+
+            // One OMM record initializes one propagator
+            let sgp4s = from_omm_kvn_string(&case.omm)
+                .unwrap_or_else(|err| panic!("{key}: {} failed to parse: {err:?}", case.name));
+            assert_eq!(sgp4s.len(), 1, "{key}: expected one OMM");
+            let sgp4 = &sgp4s[0];
+
+            for i in 0..n {
+                let expected = [
+                    case.x_teme_m[i],
+                    case.y_teme_m[i],
+                    case.z_teme_m[i],
+                    case.vx_teme_m_per_s[i],
+                    case.vy_teme_m_per_s[i],
+                    case.vz_teme_m_per_s[i],
+                ];
+                let t_mins = case.time_delta[i];
+
+                // Minutes from epoch
+                let state_delta = sgp4_prop_delta(sgp4, t_mins).unwrap_or_else(|err| {
+                    panic!("{key}: {} delta at t_mins={t_mins}: {err:?}", case.name)
+                });
+                assert_python_sgp4_state(key, &case.name, "delta", t_mins, &state_delta, &expected);
+
+                // Same instant as a UTC timestamp
+                let datetime = parse_iso_utc(&case.time_utc[i]);
+                let state_utc = sgp4_prop_datetime(sgp4, &datetime).unwrap_or_else(|err| {
+                    panic!("{key}: {} utc at t_mins={t_mins}: {err:?}", case.name)
+                });
+                assert_python_sgp4_state(key, &case.name, "utc", t_mins, &state_utc, &expected);
+            }
+        }
     }
 }

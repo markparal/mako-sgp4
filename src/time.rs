@@ -456,6 +456,13 @@ pub fn dayofyr2utc(year: i32, dayofyr: f64) -> Result<DateTime, DateError> {
 mod tests {
     use super::*;
 
+    /// Convert known UTC datetimes to Julian dates
+    ///
+    /// Covers a 20th century date, a 21st century date, the year 2000, a date
+    /// before Gregorian adoption, and a non-UTC timezone.
+    ///
+    /// # Panics
+    /// * If a conversion misses the expected Julian date or the expected error
     #[test]
     fn test_utc2jday() {
         // Make a test date in 20th century
@@ -555,6 +562,13 @@ mod tests {
         assert_eq!(result.unwrap_err(), DateError::DateNotUTC);
     }
 
+    /// Convert known UTC datetimes to Modified Julian dates
+    ///
+    /// Covers a 20th century date, a 21st century date, the year 2000, a date
+    /// before Gregorian adoption, and a non-UTC timezone.
+    ///
+    /// # Panics
+    /// * If a conversion misses the expected Modified Julian date or the expected error
     #[test]
     fn test_utc2mjday() {
         // Make a test date in 20th century
@@ -653,6 +667,12 @@ mod tests {
         assert_eq!(result.unwrap_err(), DateError::DateNotUTC);
     }
 
+    /// Convert a year and day-of-year into a UTC datetime
+    ///
+    /// Checks a fractional day, a time near the next year, and day 366 of a leap year.
+    ///
+    /// # Panics
+    /// * If a converted calendar field is wrong
     #[test]
     fn test_dayofyr_rounding() {
         // Test date in 20th century - Day 100.5 of 1959 (April 10, 1959 at 12:00:00)
