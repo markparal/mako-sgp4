@@ -1,37 +1,65 @@
 # mako-sgp4: Math Specification
-**By Mark Paral**
+**By [Mark Paral](https://markparal.com/)**
+
+**Abstract.** This document outlines the mathematics implemented by [mako-sgp4](https://github.com/markparal/mako-sgp4), a Rust implementation of the SGP4/SDP4 orbit propagator. It describes the general perturbation (GP) element set formats the crate ingests (TLE and OMM), the equations used to initialize the propagator, and the equations used to propagate the satellite state to a requested time. References to the source code are made throughout as this document is intended to be read alongside the code. The implementation follows the theory of Hoots et al. with the practical corrections of Vallado et al., and it is verified against both reference implementations to within 1 mm in position and 1 mm/s in velocity.
 
 <p align="center">
   <img src="../assets/logo_dark.png" alt="mako-sgp4 logo" width="240">
 </p>
 
 ## Table of Contents
-1. [Introduction](#introduction)
-2. [SGP4 Historical Background](#sgp4-historical-background)
-3. [GP Element Sets](#gp-element-sets)
-    - [Two-Line Element (TLE) Format](#two-line-element-tle-format)
-    - [Orbit Mean-Elements Message (OMM) Format](#orbit-mean-elements-message-omm-format)
-4. [SGP4 Algorithm](#sgp4-algorithm)
-    - [Initialization](#initialization)
-    - [Propagation](#propagation)
-5. [Thanks](#thanks)
-6. [References](#references)
+- [1. Introduction](#1-introduction)
+- [2. SGP4 Historical Background](#2-sgp4-historical-background)
+- [3. GP Element Sets](#3-gp-element-sets)
+    - [3.1 Two-Line Element (TLE) Format](#31-two-line-element-tle-format)
+    - [3.2 Orbit Mean-Elements Message (OMM) Format](#32-orbit-mean-elements-message-omm-format)
+- [4. Notation and Conventions](#4-notation-and-conventions)
+    - [4.1 Units](#41-units)
+    - [4.2 Symbols and Subscripts](#42-symbols-and-subscripts)
+    - [4.3 Conventions](#43-conventions)
+    - [4.4 Acronyms](#44-acronyms)
+- [5. SGP4 Algorithm Overview](#5-sgp4-algorithm-overview)
+- [6. Initialization](#6-initialization)
+    - [6.1 Recover Brouwer Mean Elements](#61-recover-brouwer-mean-elements)
+    - [6.2 Initialize Atmospheric Drag Parameters](#62-initialize-atmospheric-drag-parameters)
+    - [6.3 Initialize Earth Zonal Harmonics Parameters](#63-initialize-earth-zonal-harmonics-parameters)
+    - [6.4 Initialize Lunar and Solar Third-Body Parameters](#64-initialize-lunar-and-solar-third-body-parameters)
+    - [6.5 Initialize Earth Half-Day and Whole-Day Resonance Effects](#65-initialize-earth-half-day-and-whole-day-resonance-effects)
+- [7. Propagation](#7-propagation)
+    - [7.1 Calculate the Time Since Epoch](#71-calculate-the-time-since-epoch)
+    - [7.2 Account for Earth Zonal Gravity and Partial Atmospheric Drag Effects](#72-account-for-earth-zonal-gravity-and-partial-atmospheric-drag-effects)
+    - [7.3 Account for Lunar and Solar Third-Body Secular Effects](#73-account-for-lunar-and-solar-third-body-secular-effects)
+    - [7.4 Account for Earth Half-Day and Whole-Day Resonance Effects](#74-account-for-earth-half-day-and-whole-day-resonance-effects)
+    - [7.5 Account for Remaining Atmospheric Drag Effects](#75-account-for-remaining-atmospheric-drag-effects)
+    - [7.6 Recover the Mean Elements](#76-recover-the-mean-elements)
+    - [7.7 Account for Long-Period Periodic Effects of Lunar and Solar Gravity](#77-account-for-long-period-periodic-effects-of-lunar-and-solar-gravity)
+    - [7.8 Account for Long-Period Periodic Effects of Earth's Gravity](#78-account-for-long-period-periodic-effects-of-earths-gravity)
+    - [7.9 Solve Kepler's Equation](#79-solve-keplers-equation)
+    - [7.10 Account for Short-Period Periodic Effects of Earth's Gravity](#710-account-for-short-period-periodic-effects-of-earths-gravity)
+    - [7.11 Calculate Position and Velocity Vectors in the TEME Frame](#711-calculate-position-and-velocity-vectors-in-the-teme-frame)
+- [8. Verification](#8-verification)
+- [Appendix A: World Geodetic System (WGS) Models](#appendix-a-world-geodetic-system-wgs-models)
+- [Appendix B: Constants for the Sun and Moon](#appendix-b-constants-for-the-sun-and-moon)
+- [Appendix C: Constants for Earth Resonance](#appendix-c-constants-for-earth-resonance)
+- [Thanks](#thanks)
+- [Revision History](#revision-history)
+- [References](#references)
 
-## Introduction
+## 1. Introduction
 On October 4th, 1957, Sputnik was launched into orbit by the Soviet Union. With the opening of space for artificial satellites, the urgent need to catalog and track all objects around the Earth became apparent. Thanks to the efforts of numerous members of the US military and scientific community, new theories were developed and infrastructure put in place to realize these goals. Today, these tools act as the backbone of modern space situational awareness (SSA). 
 
 Critical to this infrastructure is the Simplified General Perturbations 4 model (SGP4), which, using provided general perturbation element sets (GPs), generates reliably accurate (sub-1 km position error at epoch) position and velocity state estimates for each cataloged orbiting object. Originally implemented in 1970, SGP4 strikes a difficult balance between computational efficiency and accuracy as a semianalytical orbital propagator. The impressiveness of this achievement cannot be overstated, as it remains one of, if not the most, important propagator in the industry nearly 56 years later (as of 2026).
 
-As a member of the space community who makes active use of these SSA resources, [mako-sgp4](https://github.com/markparal/mako-sgp4) ([10]) was developed to gain a deeper understanding of the underlying theory behind this immensely important model. It combines both the theory detailed in *History of Analytical Orbit Modeling in the U.S. Space Surveillance System* by Hoots et al ([9]) and the practical implementation fixes perscribed in *Revisiting Spacetrack Report #3: Rev 3* by Vallado et al ([14]). The rest of this document will dive into this theory to facilitate understanding of the codebase.
+As a member of the space community who makes active use of these SSA resources, [mako-sgp4](https://github.com/markparal/mako-sgp4) ([10]) was developed to gain a deeper understanding of the underlying theory behind this immensely important model. It combines both the theory detailed in *History of Analytical Orbit Modeling in the U.S. Space Surveillance System* by Hoots et al. ([9]) and the practical implementation fixes perscribed in *Revisiting Spacetrack Report #3: Rev 3* by Vallado et al. ([14]). The rest of this document will dive into this theory to facilitate understanding of the codebase.
 
-## SGP4 Historical Background
-For a complete historical rundown of the development of SGP4, it is recommended to read *History of Analytical Orbit Modeling in the U.S. Space Surveillance System* by Hoots et al ([9]), which details the creation and evolution of the U.S. Space Surveillance system. This paper also discusses the various theories and works that contributed to the modern SGP4 algorithm. A (non-exhaustive) list includes:
+## 2. SGP4 Historical Background
+For a complete historical rundown of the development of SGP4, it is recommended to read *History of Analytical Orbit Modeling in the U.S. Space Surveillance System* by Hoots et al. ([9]), which details the creation and evolution of the U.S. Space Surveillance system. This paper also discusses the various theories and works that contributed to the modern SGP4 algorithm. A (non-exhaustive) list includes:
 - The effects of the J2, J3, and J4 Earth zonal harmonics on the orbit of a satellite ([1], [2])
 - The effects of atmospheric drag on the orbits of satellites ([3], [4], [6])
 - The avoidance of small divisors of eccentricity or sine of inclination in propagation ([5])
 - The inclusion of lunar and solar gravitational effects as well as Earth tesseral harmonics ([7], [8])
 
-## GP Element Sets
+## 3. GP Element Sets
 
 | Field | Symbol | Units | Description |
 | --- | --- | --- | --- |
@@ -55,11 +83,11 @@ For a complete historical rundown of the development of SGP4, it is recommended 
 
 <p align="center"><strong>Table 1.</strong> Standard GP element set fields</p>
 
-The units in Table 1 are the units the fields are distributed in. In all equations that follow, the angles $i_B$, $\Omega_B$, $\omega_B$, and $M_B$ are converted to radians and the mean motion $n_K$ is converted to radians/min.
+The units in Table 1 are the units the fields are distributed in (see Section 4 for the units used in the equations).
 
 The contents of GP element sets are described in Table 1 above. These elements characterize the orbit of a satellite and are what SGP4 uses to propagate the position and velocity over time. There are two primary formats for the distribution and ingestion of GP element sets: the two-line element (TLE) format and the orbit mean-elements message (OMM) format.
 
-### Two-Line Element (TLE) Format
+### 3.1 Two-Line Element (TLE) Format
 The TLE formats all the necessary GP elements into two lines. An example of this is given below.
 
 ```
@@ -110,11 +138,11 @@ While the TLE has traditionally been the GP format of choice, it has several def
 1. The limiting of epochs and international designators to years between 1957 and 2056
 2. The limiting of NORAD IDs to 339999 (even with Alpha-5 encoding)
 3. International designators can only represent launches up to 999 in a single year
-4. International designators can only represent pieces of a launch up to a 3 character code
+4. International designators can only represent pieces of a launch up to a 3-character code
 
 All of these issues are alleviated with the OMM format.
 
-### Orbit Mean-Elements Message (OMM) Format
+### 3.2 Orbit Mean-Elements Message (OMM) Format
 The OMM format assigns values to keywords. These keywords correspond to the necessary GP elements. An example of this is given below.
 
 ```
@@ -180,7 +208,61 @@ The standards for the OMM format and its associated fields can be found at [13].
 
 Because the OMM format follows a keyword-value pattern, it exists in multiple general-purpose data formats as well, including KVN (as the example above shows), XML, JSON, and CSV.
 
-## SGP4 Algorithm
+## 4. Notation and Conventions
+
+### 4.1 Units
+Unless stated otherwise, the equations in Sections 6 and 7 use the internal SGP4 units below. Conversions to and from the distribution units (Table 1) and the output units (km and km/s) are noted where they occur.
+
+| Quantity | Internal Unit | Notes |
+| --- | --- | --- |
+| Distance | Earth radii | $a_E = 1$ Earth radius $= R_e$ km (Appendix A) |
+| Time | minutes | $t$ is the time since the GP element set epoch |
+| Angles | radians | GP angles $i_B$, $\Omega_B$, $\omega_B$, $M_B$ are converted from degrees |
+| Mean motion | radians/min | $n_K$ is converted from revolutions/day by $n_K \cdot 2\pi / 1440$ |
+| Rates | per minute | Except the lunar and solar constants in Appendix B, which are per day |
+| Dates | days | Julian dates in UTC |
+
+<p align="center"><strong>Table 4.</strong> Internal units</p>
+
+### 4.2 Symbols and Subscripts
+- Subscript $B$ denotes a Brouwer mean element (e.g., $n_B$), and subscript $K$ denotes the Kozai mean motion distributed in the GP element set ($n_K$).
+- Subscript $X$ denotes a third body, with $X = M$ for the Moon and $X = S$ for the Sun.
+- Subscript $0$ denotes a value at a reference epoch, either the GP element set epoch or the lunar/solar element epoch $t_{SM}$.
+- $\theta_B = \cos i_B$ and $\beta_B = \sqrt{1 - e_B^2}$.
+- A dot denotes a time derivative, e.g., $\dot{\Omega}_B$ is a secular rate of the right ascension of the ascending node.
+- $J_n$ are zonal harmonics, and $k_2 = \frac{1}{2} J_2 a_E^2$ and $k_4 = -\frac{3}{8} J_4 a_E^4$ are the normalized zonal constants. $Q_{lm}$ and $\lambda_{lm}$ are the amplitude and phase of the $(l, m)$ tesseral harmonic.
+
+### 4.3 Conventions
+- $x \bmod 2\pi$ follows C `fmod` semantics (Rust `%` on `f64`), so the result keeps the sign of $x$. This matters for the mean element recovery in Section 7.6.
+- $\mathrm{atan2}(y, x)$ is the four-quadrant inverse tangent.
+- Equations are numbered by section, e.g., Eq. (6.2.3) is the third equation in Section 6.2.
+
+### 4.4 Acronyms
+| Acronym | Meaning |
+| --- | --- |
+| CCSDS | Consultative Committee for Space Data Systems |
+| COSPAR | Committee on Space Research (international designator authority) |
+| ECI | Earth-centered inertial |
+| GMST | Greenwich mean sidereal time |
+| GP | General perturbations (element set) |
+| IAU | International Astronomical Union |
+| JD | Julian date |
+| KVN | Keyword-value notation |
+| NORAD | North American Aerospace Defense Command (catalog number authority) |
+| OMM | Orbit mean-elements message |
+| RAAN | Right ascension of the ascending node |
+| SDP4 | Simplified deep-space perturbations 4 (the deep-space extension of SGP4) |
+| SGP4 | Simplified general perturbations 4 |
+| SSA | Space situational awareness |
+| TEME | True equator, mean equinox |
+| TLE | Two-line element set |
+| UTC | Coordinated universal time |
+| UT1 | Universal time 1 (Earth rotation angle time scale) |
+| WGS | World geodetic system |
+
+<p align="center"><strong>Table 5.</strong> Acronyms</p>
+
+## 5. SGP4 Algorithm Overview
 As stated previously, the goal of the SGP4 propagator is to find a balance between accuracy and efficiency. Given the need for efficient propagation, only important orbital perturbations are calculated in SGP4. These perturbations include:
 - The J2, J3, and J4 Earth zonal harmonic effects
 - The atmospheric drag effects
@@ -193,133 +275,137 @@ The SGP4 algorithm can be broken into two primary phases:
 1. Initialization - Calculating the time-independent propagation terms
 2. Propagation - Calculating the satellite state at a given time
 
-### Initialization
+## 6. Initialization
 Initialization starts from a GP element set (see Table 1). The goal in the initialization process is to calculate the values required for propagation that are independent of time. In mako-sgp4, these values are stored in `Sgp4` structs. 
 
 At a high level, the initialization process can be broken into a series of steps that will be covered individually. These steps are
 1. Recover Brouwer mean elements
 2. Initialize atmospheric drag parameters
 3. Initialize Earth zonal harmonics parameters
-4. Initialize lunar and solar third body parameters
-5. Initialize Earth half and whole day resonance effects
+4. Initialize lunar and solar third-body parameters
+5. Initialize Earth half-day and whole-day resonance effects
 
-#### Step 1. Recover Brouwer Mean Elements
-We will define the Brouwer mean element set with Table 4 below.
+### 6.1 Recover Brouwer Mean Elements
+Implemented in `init_sgp4` (`src/sgp4.rs`), stored in `Sgp4.brouwer0`.
 
-| Element | Symbol | Units | Definition |
-| --- | --- | --- | --- |
-| Inclination | $i_{B}$ | radians | Orbital inclination |
-| Theta | $\theta_{B}$ | - | Cosine of inclination, $\theta_{B} = \cos i_{B}$ |
-| Right Ascension of Ascending Node | $\Omega_{B}$ | radians | Right ascension of the ascending node (RAAN) |
-| Eccentricity | $e_{B}$ | - | Orbital eccentricity |
-| Beta | $\beta_{B}$ | - | $\beta_{B} = \sqrt{1 - e_{B}^{2}}$ |
-| Argument of Perigee | $\omega_{B}$ | radians | Argument of perigee |
-| Mean Anomaly | $M_{B}$ | radians | Mean anomaly |
-| Mean Motion | $n_{B}$ | radians/min | Brouwer mean motion |
-| Semi-major Axis | $a_{B}$ | Earth radii | Semi-major axis |
-| Period | $T_{B}$ | min | Orbital period |
+We will define the Brouwer mean element set with Table 6 below.
 
-<p align="center"><strong>Table 4.</strong> Brouwer mean element set</p> 
+| Element | Symbol | Units | Definition | Code |
+| --- | --- | --- | --- | --- |
+| Inclination | $i_{B}$ | radians | Orbital inclination | `brouwer0.i` |
+| Theta | $\theta_{B}$ | - | Cosine of inclination, $\theta_{B} = \cos i_{B}$ | `brouwer0.theta` |
+| Right Ascension of Ascending Node | $\Omega_{B}$ | radians | Right ascension of the ascending node (RAAN) | `brouwer0.raan` |
+| Eccentricity | $e_{B}$ | - | Orbital eccentricity | `brouwer0.e` |
+| Beta | $\beta_{B}$ | - | $\beta_{B} = \sqrt{1 - e_{B}^{2}}$ | `brouwer0.beta` |
+| Argument of Perigee | $\omega_{B}$ | radians | Argument of perigee | `brouwer0.omega` |
+| Mean Anomaly | $M_{B}$ | radians | Mean anomaly | `brouwer0.m` |
+| Mean Motion | $n_{B}$ | radians/min | Brouwer mean motion | `brouwer0.n` |
+| Semi-major Axis | $a_{B}$ | Earth radii | Semi-major axis | `brouwer0.a` |
+| Period | $T_{B}$ | min | Orbital period | `brouwer0.period` |
 
-Many of these values are consistent with what is provided via the GP element set (with unit conversions). The main lift in this step is to convert the Kozai mean motion ($n_{K}$) into the Brouwer mean motion ($n_{B}$). This process is detailed in eqs 1-5.
+<p align="center"><strong>Table 6.</strong> Brouwer mean element set (Code fields are on <code>Sgp4</code>)</p>
 
-$$
-a_1 = \left(\frac{k_e}{n_{K}}\right)^{2/3} \tag{1}
-$$
+Many of these values are consistent with what is provided via the GP element set (with unit conversions). The main lift in this step is to convert the Kozai mean motion ($n_{K}$) into the Brouwer mean motion ($n_{B}$). This process is detailed in Eqs. (6.1.1)–(6.1.5).
 
 $$
-\delta_1 = \frac{3}{2} \frac{k_2}{a_1^2} \frac{(3 \theta_B^2 - 1)}{(1 - e_B^2)^{3/2}} \tag{2}
+a_1 = \left(\frac{k_e}{n_{K}}\right)^{2/3} \tag{6.1.1}
 $$
 
 $$
-a_2 = a_1 (1 - \frac{1}{3} \delta_1 - \delta_1^2 - \frac{134}{81} \delta_1^3) \tag{3}
+\delta_1 = \frac{3}{2} \frac{k_2}{a_1^2} \frac{(3 \theta_B^2 - 1)}{(1 - e_B^2)^{3/2}} \tag{6.1.2}
 $$
 
 $$
-\delta_0 = \frac{3}{2} \frac{k_2}{a_2^2} \frac{(3 \theta_B^2 - 1)}{(1 - e_B^2)^{3/2}} \tag{4}
+a_2 = a_1 (1 - \frac{1}{3} \delta_1 - \delta_1^2 - \frac{134}{81} \delta_1^3) \tag{6.1.3}
 $$
 
 $$
-n_B = \frac{n_K}{1 + \delta_0} \tag{5}
-$$
-
-With the Brouwer mean motion, extract the semi-major axis and orbital period as well with eqs 6-7.
-
-$$
-a_B = \left(\frac{k_e}{n_B}\right)^{2/3} \tag{6}
+\delta_0 = \frac{3}{2} \frac{k_2}{a_2^2} \frac{(3 \theta_B^2 - 1)}{(1 - e_B^2)^{3/2}} \tag{6.1.4}
 $$
 
 $$
-T_B = 2 \pi \frac{\sqrt{(a_B R_e)^3 / \mu_e}}{60} \tag{7}
+n_B = \frac{n_K}{1 + \delta_0} \tag{6.1.5}
 $$
 
-#### Step 2. Initialize Atmospheric Drag Parameters
-We will define the atmospheric drag parameters with Table 5 below.
-
-| Parameter | Symbol | Units | Definition |
-| --- | --- | --- | --- |
-| Perigee Height | $h_{p}$ | km | Perigee height |
-| Reference Distance | $q_{0}$ | Earth radii | Reference distance from the center of the Earth used in the power-law density function (equal to 120km in altitude) |
-| s | $s$ | Earth radii | Parameter of the power-law density function |
-| Zeta | $\zeta$ | 1 / Earth radii | $\zeta = 1 / (a_{B} - s)$ |
-| Eta | $\eta$ | - | $\eta = a_{B} e_{B} \zeta$ |
-| C1 | $C_{1}$ | 1 / min | Drag coefficient |
-| C3 | $C_{3}$ | Earth radii / min | Drag coefficient |
-| C4 | $C_{4}$ | Earth radii / min | Drag coefficient |
-| C5 | $C_{5}$ | Earth radii | Drag coefficient |
-| D2 | $D_{2}$ | 1 / min^2 | Higher-order drag coefficient |
-| D3 | $D_{3}$ | 1 / min^3 | Higher-order drag coefficient |
-| D4 | $D_{4}$ | 1 / min^4 | Higher-order drag coefficient |
-
-<p align="center"><strong>Table 5.</strong> Atmospheric drag parameters</p>
-
-Atmospheric drag modeling in SGP4 is based on the power-law density function given in eq 8, where $r$ is the radial distance between the satellite and the center of the Earth, $\rho$ is the atmospheric density, and $\rho_0$ is the reference atmospheric density at a distance $q_0$ from the center of the Earth.
+With the Brouwer mean motion, extract the semi-major axis and orbital period as well with Eqs. (6.1.6)–(6.1.7).
 
 $$
-\rho = \rho_0 (q_0 - s)^4 / (r - s)^4 \tag{8}
+a_B = \left(\frac{k_e}{n_B}\right)^{2/3} \tag{6.1.6}
 $$
 
-Because $q_0$ is a reference, it is always the same constant given by eq 9.
-
 $$
-q_0 = (120 + R_e) / R_e \tag{9}
+T_B = 2 \pi \frac{\sqrt{(a_B R_e)^3 / \mu_e}}{60} \tag{6.1.7}
 $$
 
-The perigee height is given by eq 10.
+### 6.2 Initialize Atmospheric Drag Parameters
+Implemented in `init_atm_effects` (`src/sgp4.rs`), stored in `Sgp4.atm_params`.
+
+We will define the atmospheric drag parameters with Table 7 below.
+
+| Parameter | Symbol | Units | Definition | Code |
+| --- | --- | --- | --- | --- |
+| Perigee Height | $h_{p}$ | km | Perigee height | `atm_params.hp` |
+| Reference Distance | $q_{0}$ | Earth radii | Reference distance from the center of the Earth used in the power-law density function (equal to 120km in altitude) | `atm_params.q0` |
+| s | $s$ | Earth radii | Parameter of the power-law density function | `atm_params.s` |
+| Zeta | $\zeta$ | 1 / Earth radii | $\zeta = 1 / (a_{B} - s)$ | `atm_params.zeta` |
+| Eta | $\eta$ | - | $\eta = a_{B} e_{B} \zeta$ | `atm_params.eta` |
+| C1 | $C_{1}$ | 1 / min | Drag coefficient | `atm_params.c1` |
+| C3 | $C_{3}$ | Earth radii / min | Drag coefficient | `atm_params.c3` |
+| C4 | $C_{4}$ | Earth radii / min | Drag coefficient | `atm_params.c4` |
+| C5 | $C_{5}$ | Earth radii | Drag coefficient | `atm_params.c5` |
+| D2 | $D_{2}$ | 1 / min^2 | Higher-order drag coefficient | `atm_params.d2` |
+| D3 | $D_{3}$ | 1 / min^3 | Higher-order drag coefficient | `atm_params.d3` |
+| D4 | $D_{4}$ | 1 / min^4 | Higher-order drag coefficient | `atm_params.d4` |
+
+<p align="center"><strong>Table 7.</strong> Atmospheric drag parameters</p>
+
+Atmospheric drag modeling in SGP4 is based on the power-law density function given in Eq. (6.2.1), where $r$ is the radial distance between the satellite and the center of the Earth, $\rho$ is the atmospheric density, and $\rho_0$ is the reference atmospheric density at a distance $q_0$ from the center of the Earth.
 
 $$
-h_p = R_e \left(a_B (1 - e_B) - 1 \right) \tag{10}
+\rho = \rho_0 (q_0 - s)^4 / (r - s)^4 \tag{6.2.1}
 $$
 
-The parameter $s$ is defined as a piecewise function of $h_p$ in eq 11.
+Because $q_0$ is a reference, it is always the same constant given by Eq. (6.2.2).
+
+$$
+q_0 = (120 + R_e) / R_e \tag{6.2.2}
+$$
+
+The perigee height is given by Eq. (6.2.3).
+
+$$
+h_p = R_e \left(a_B (1 - e_B) - 1 \right) \tag{6.2.3}
+$$
+
+The parameter $s$ is defined as a piecewise function of $h_p$ in Eq. (6.2.4).
 
 $$
 s = \begin{cases}
 (78 + R_e) / R_e & h_p \ge 156 \\
 (h_p - 78 + R_e) / R_e & 98 \le h_p < 156 \\
 (20 + R_e) / R_e & h_p < 98
-\end{cases} \tag{11}
+\end{cases} \tag{6.2.4}
 $$
 
-Additional constants are defined with eqs 12-15 ($A_{3,0}$ is in units of Earth Radii^3)
+Additional constants are defined with Eqs. (6.2.5)–(6.2.8) ($A_{3,0}$ is in units of Earth Radii^3)
 
 $$
-A_{3,0} = -J_3 R_e^3 / R_e^3 \tag{12}
+A_{3,0} = -J_3 R_e^3 / R_e^3 \tag{6.2.5}
 $$
 
 $$ 
-\zeta = \frac{1}{a_B - s} \tag{13}
+\zeta = \frac{1}{a_B - s} \tag{6.2.6}
 $$
 
 $$
-\eta = a_B e_B \zeta \tag{14}
+\eta = a_B e_B \zeta \tag{6.2.7}
 $$
 
 $$
-\psi^2 = |1 - \eta^2| \tag{15}
+\psi^2 = |1 - \eta^2| \tag{6.2.8}
 $$
 
-Drag coefficients are defined with eqs 16-20. $C_3$ is set to zero for small eccentricity to avoid division by $e_B$.
+Drag coefficients are defined with Eqs. (6.2.9)–(6.2.13). $C_3$ is set to zero for small eccentricity to avoid division by $e_B$.
 
 $$
 \begin{aligned}
@@ -327,18 +413,18 @@ C_2 &= (q_0 - s)^4 \zeta^4 n_B \left(\psi^2\right)^{-7/2} \\
 &\qquad \times \Biggl[ a_B \left(1 + \frac{3}{2} \eta^2 + 4 e_B \eta + e_B \eta^3\right) \\
 &\qquad + \frac{3}{2} \frac{k_2 \zeta}{\psi^2} \left(-\frac{1}{2} + \frac{3}{2} \theta_B^2\right) \left(8 + 24 \eta^2 + 3 \eta^4\right) \Biggr]
 \end{aligned}
-\tag{16}
+\tag{6.2.9}
 $$
 
 $$
-C_1 = B^{*} C_2 \tag{17}
+C_1 = B^{*} C_2 \tag{6.2.10}
 $$
 
 $$
 C_3 = \begin{cases}
 \dfrac{(q_0 - s)^4 \zeta^5 A_{3,0} n_B \sin i_B}{k_2 e_B} & e_B > 10^{-4} \\
 0 & e_B \le 10^{-4}
-\end{cases} \tag{18}
+\end{cases} \tag{6.2.11}
 $$
 
 $$
@@ -349,7 +435,7 @@ C_4 &= 2 n_B (q_0 - s)^4 \zeta^4 a_B \beta_B^2 \left(\psi^2\right)^{-7/2} \\
 &\qquad\qquad 3\left(1 - 3\theta_B^2\right)\left(1 + \frac{3}{2}\eta^2 - 2 e_B \eta - \frac{1}{2} e_B \eta^3\right) \\
 &\qquad\qquad + \frac{3}{4}\left(1 - \theta_B^2\right)\left(2\eta^2 - e_B \eta - e_B \eta^3\right) \cos\left(2\omega_B\right) \Biggr) \Biggr]
 \end{aligned}
-\tag{19}
+\tag{6.2.12}
 $$
 
 $$
@@ -357,35 +443,37 @@ $$
 C_5 &= 2 (q_0 - s)^4 \zeta^4 a_B \beta_B^2 \left(\psi^2\right)^{-7/2} \\
 &\qquad \times \left(1 + \frac{11}{4} \eta\left(\eta + e_B\right) + e_B \eta^3\right)
 \end{aligned}
-\tag{20}
+\tag{6.2.13}
 $$
 
-Higher-order drag coefficients are defined with eqs 21-23.
+Higher-order drag coefficients are defined with Eqs. (6.2.14)–(6.2.16).
 
 $$
-D_2 = 4 a_B \zeta C_1^2 \tag{21}
-$$
-
-$$
-D_3 = \frac{4}{3} a_B \zeta^2 \left(17 a_B + s\right) C_1^3 \tag{22}
+D_2 = 4 a_B \zeta C_1^2 \tag{6.2.14}
 $$
 
 $$
-D_4 = \frac{2}{3} a_B^2 \zeta^3 \left(221 a_B + 31 s\right) C_1^4 \tag{23}
+D_3 = \frac{4}{3} a_B \zeta^2 \left(17 a_B + s\right) C_1^3 \tag{6.2.15}
 $$
 
-#### Step 3. Initialize Earth Zonal Harmonics Parameters
-We will define the Earth zonal harmonics parameters with Table 6 below.
+$$
+D_4 = \frac{2}{3} a_B^2 \zeta^3 \left(221 a_B + 31 s\right) C_1^4 \tag{6.2.16}
+$$
 
-| Parameter | Symbol | Units | Definition |
-| --- | --- | --- | --- |
-| Mean Anomaly Rate | $\dot{M}_{B}$ | radians/min | Secular rate of change of mean anomaly due to the zonal harmonics, excluding the mean motion $n_B$ |
-| Argument of Perigee Rate | $\dot{\omega}_{B}$ | radians/min | Secular rate of change of argument of perigee |
-| Right Ascension of Ascending Node Rate | $\dot{\Omega}_{B}$ | radians/min | Secular rate of change of the right ascension of the ascending node (RAAN) |
+### 6.3 Initialize Earth Zonal Harmonics Parameters
+Implemented in `init_zonal_effects` (`src/sgp4.rs`), stored in `Sgp4.zonal_params`.
 
-<p align="center"><strong>Table 6.</strong> Earth zonal harmonics parameters</p>
+We will define the Earth zonal harmonics parameters with Table 8 below.
 
-The Earth zonal harmonics in SGP4 consider the impacts of $J_2$ and $J_4$. The resulting secular rates of the Brouwer mean elements are given in eqs 24-26. Note that $\dot{M}_B$ excludes the unperturbed motion $n_B$, so the total secular rate of the mean anomaly is $n_B + \dot{M}_B$.
+| Parameter | Symbol | Units | Definition | Code |
+| --- | --- | --- | --- | --- |
+| Mean Anomaly Rate | $\dot{M}_{B}$ | radians/min | Secular rate of change of mean anomaly due to the zonal harmonics, excluding the mean motion $n_B$ | `zonal_params.m_dot` |
+| Argument of Perigee Rate | $\dot{\omega}_{B}$ | radians/min | Secular rate of change of argument of perigee | `zonal_params.omega_dot` |
+| Right Ascension of Ascending Node Rate | $\dot{\Omega}_{B}$ | radians/min | Secular rate of change of the right ascension of the ascending node (RAAN) | `zonal_params.raan_dot` |
+
+<p align="center"><strong>Table 8.</strong> Earth zonal harmonics parameters</p>
+
+The Earth zonal harmonics in SGP4 consider the impacts of $J_2$ and $J_4$. The resulting secular rates of the Brouwer mean elements are given in Eqs. (6.3.1)–(6.3.3). Note that $\dot{M}_B$ excludes the unperturbed motion $n_B$, so the total secular rate of the mean anomaly is $n_B + \dot{M}_B$.
 
 $$
 \begin{aligned}
@@ -394,7 +482,7 @@ $$
 &\qquad + \frac{3 k_2^{2} \left(13 - 78 \theta_B^{2} + 137 \theta_B^{4}\right)}{16 a_B^{4} \beta_B^{7}}
 \Biggr]
 \end{aligned}
-\tag{24}
+\tag{6.3.1}
 $$
 
 $$
@@ -405,7 +493,7 @@ $$
 &\qquad + \frac{5 k_4 \left(3 - 36 \theta_B^{2} + 49 \theta_B^{4}\right)}{4 a_B^{4} \beta_B^{8}}
 \Biggr]
 \end{aligned}
-\tag{25}
+\tag{6.3.2}
 $$
 
 $$
@@ -416,196 +504,200 @@ $$
 &\qquad + \frac{5 k_4 \theta_B \left(3 - 7 \theta_B^{2}\right)}{2 a_B^{4} \beta_B^{8}}
 \Biggr]
 \end{aligned}
-\tag{26}
+\tag{6.3.3}
 $$
 
-#### Step 4. Initialize Lunar and Solar Third Body Parameters
-We will define the lunar and solar third body parameters with Table 7 below.
+### 6.4 Initialize Lunar and Solar Third-Body Parameters
+Implemented in `init_lunar_solar_effects` and `calc_lunar_solar_secular_rates` (`src/sgp4.rs`), stored in `Sgp4.lunar_params` and `Sgp4.solar_params`.
 
-| Parameter | Symbol | Units | Definition |
-| --- | --- | --- | --- |
-| Inclination Cosine | $\cos i_{X}$ | - | Cosine of third body orbital inclination |
-| Inclination Sine | $\sin i_{X}$ | - | Sine of third body orbital inclination |
-| Eccentricity | $e_{X}$ | - | Third body orbital eccentricity |
-| Mean Motion | $n_{X}$ | radians/min | Third body mean motion |
-| Argument of Perigee Cosine | $\cos \omega_{X}$ | - | Cosine of third body argument of perigee |
-| Argument of Perigee Sine | $\sin \omega_{X}$ | - | Sine of third body argument of perigee |
-| Right Ascension of Ascending Node | $\Omega_{X}$ | radians | Third body right ascension of the ascending node (RAAN) |
-| Mean Anomaly | $M_{X}$ | radians | Third body mean anomaly |
-| Beta | $\beta_{X}$ | - | $\beta_{X} = \sqrt{1 - e_{X}^{2}}$ |
-| Perturbation Coefficient | $C_{X}$ | radians/min | Third body perturbation coefficient |
-| X1 | $x_{1,X}$ | - | Third body geometric coefficient |
-| X2 | $x_{2,X}$ | - | Third body geometric coefficient |
-| X3 | $x_{3,X}$ | - | Third body geometric coefficient |
-| X4 | $x_{4,X}$ | - | Third body geometric coefficient |
-| X5 | $x_{5,X}$ | - | Third body geometric coefficient |
-| X6 | $x_{6,X}$ | - | Third body geometric coefficient |
-| X7 | $x_{7,X}$ | - | Third body geometric coefficient |
-| X8 | $x_{8,X}$ | - | Third body geometric coefficient |
-| Z1 | $z_{1,X}$ | - | Third body geometric coefficient |
-| Z2 | $z_{2,X}$ | - | Third body geometric coefficient |
-| Z3 | $z_{3,X}$ | - | Third body geometric coefficient |
-| Z11 | $z_{11,X}$ | - | Third body geometric coefficient |
-| Z13 | $z_{13,X}$ | - | Third body geometric coefficient |
-| Z21 | $z_{21,X}$ | - | Third body geometric coefficient |
-| Z23 | $z_{23,X}$ | - | Third body geometric coefficient |
-| Z22 | $z_{22,X}$ | - | Third body geometric coefficient |
-| Z12 | $z_{12,X}$ | - | Third body geometric coefficient |
-| Z31 | $z_{31,X}$ | - | Third body geometric coefficient |
-| Z32 | $z_{32,X}$ | - | Third body geometric coefficient |
-| Z33 | $z_{33,X}$ | - | Third body geometric coefficient |
-| Eccentricity Rate | $\dot{e}_{X}$ | 1 / min | Secular rate of change of satellite eccentricity |
-| Inclination Rate | $\dot{i}_{X}$ | radians/min | Secular rate of change of satellite inclination |
-| Mean Anomaly Rate | $\dot{M}_{X}$ | radians/min | Secular rate of change of satellite mean anomaly |
-| Argument of Perigee Rate | $\dot{\omega}_{X}$ | radians/min | Secular rate of change of satellite argument of perigee |
-| Right Ascension of Ascending Node Rate | $\dot{\Omega}_{X}$ | radians/min | Secular rate of change of satellite right ascension of the ascending node (RAAN) |
+We will define the lunar and solar third-body parameters with Table 9 below.
 
-<p align="center"><strong>Table 7.</strong> Lunar and solar third body parameters (subscript <em>X</em> = <em>M</em> for the Moon, <em>X</em> = <em>S</em> for the Sun)</p>
+| Parameter | Symbol | Units | Definition | Code |
+| --- | --- | --- | --- | --- |
+| Inclination Cosine | $\cos i_{X}$ | - | Cosine of third-body orbital inclination | `*_params.cos_i` |
+| Inclination Sine | $\sin i_{X}$ | - | Sine of third-body orbital inclination | `*_params.sin_i` |
+| Eccentricity | $e_{X}$ | - | Third body orbital eccentricity | `*_params.e` |
+| Mean Motion | $n_{X}$ | radians/min | Third body mean motion | `*_params.n` |
+| Argument of Perigee Cosine | $\cos \omega_{X}$ | - | Cosine of third-body argument of perigee | `*_params.cos_omega` |
+| Argument of Perigee Sine | $\sin \omega_{X}$ | - | Sine of third-body argument of perigee | `*_params.sin_omega` |
+| Right Ascension of Ascending Node | $\Omega_{X}$ | radians | Third body right ascension of the ascending node (RAAN) | `*_params.raan` |
+| Mean Anomaly | $M_{X}$ | radians | Third body mean anomaly | `*_params.m` |
+| Beta | $\beta_{X}$ | - | $\beta_{X} = \sqrt{1 - e_{X}^{2}}$ | `*_params.beta` |
+| Perturbation Coefficient | $C_{X}$ | radians/min | Third body perturbation coefficient | `*_params.c` |
+| X1 | $x_{1,X}$ | - | Third body geometric coefficient | `*_params.x1` |
+| X2 | $x_{2,X}$ | - | Third body geometric coefficient | `*_params.x2` |
+| X3 | $x_{3,X}$ | - | Third body geometric coefficient | `*_params.x3` |
+| X4 | $x_{4,X}$ | - | Third body geometric coefficient | `*_params.x4` |
+| X5 | $x_{5,X}$ | - | Third body geometric coefficient | `*_params.x5` |
+| X6 | $x_{6,X}$ | - | Third body geometric coefficient | `*_params.x6` |
+| X7 | $x_{7,X}$ | - | Third body geometric coefficient | `*_params.x7` |
+| X8 | $x_{8,X}$ | - | Third body geometric coefficient | `*_params.x8` |
+| Z1 | $z_{1,X}$ | - | Third body geometric coefficient | `*_params.z1` |
+| Z2 | $z_{2,X}$ | - | Third body geometric coefficient | `*_params.z2` |
+| Z3 | $z_{3,X}$ | - | Third body geometric coefficient | `*_params.z3` |
+| Z11 | $z_{11,X}$ | - | Third body geometric coefficient | `*_params.z11` |
+| Z13 | $z_{13,X}$ | - | Third body geometric coefficient | `*_params.z13` |
+| Z21 | $z_{21,X}$ | - | Third body geometric coefficient | `*_params.z21` |
+| Z23 | $z_{23,X}$ | - | Third body geometric coefficient | `*_params.z23` |
+| Z22 | $z_{22,X}$ | - | Third body geometric coefficient | `*_params.z22` |
+| Z12 | $z_{12,X}$ | - | Third body geometric coefficient | `*_params.z12` |
+| Z31 | $z_{31,X}$ | - | Third body geometric coefficient | `*_params.z31` |
+| Z32 | $z_{32,X}$ | - | Third body geometric coefficient | `*_params.z32` |
+| Z33 | $z_{33,X}$ | - | Third body geometric coefficient | `*_params.z33` |
+| Eccentricity Rate | $\dot{e}_{X}$ | 1 / min | Secular rate of change of satellite eccentricity | `*_params.e_dot` |
+| Inclination Rate | $\dot{i}_{X}$ | radians/min | Secular rate of change of satellite inclination | `*_params.i_dot` |
+| Mean Anomaly Rate | $\dot{M}_{X}$ | radians/min | Secular rate of change of satellite mean anomaly | `*_params.m_dot` |
+| Argument of Perigee Rate | $\dot{\omega}_{X}$ | radians/min | Secular rate of change of satellite argument of perigee | `*_params.omega_dot` |
+| Right Ascension of Ascending Node Rate | $\dot{\Omega}_{X}$ | radians/min | Secular rate of change of satellite right ascension of the ascending node (RAAN) | `*_params.raan_dot` |
 
-The lunar and solar third body effects are only considered if the spacecraft has a period greater than or equal to 225 minutes (eq 27). If this is the case, this spacecraft is classified as a "deep space" satellite.
+<p align="center"><strong>Table 9.</strong> Lunar and solar third-body parameters (subscript <em>X</em> = <em>M</em> for the Moon, <em>X</em> = <em>S</em> for the Sun; in the Code column, <code>*</code> is <code>lunar</code> or <code>solar</code>)</p>
 
-$$
-T_B \ge 225 \text{ min} \quad \text{(deep space, } n_B \le 2\pi / 225 \approx 0.0279253 \text{ rad/min)} \tag{27}
-$$
-
-The constants used for modeling the orbits and gravitational effects of the Sun and Moon are given in Tables B1 and B2. The time difference between the solar/lunar epoch and the GP element set epoch is defined as $\Delta t = JD_0 - t_{SM}$ in days, where $JD_0$ is the Julian date of the GP element set epoch. We calculate orbital parameters with eqs 28-37.
+The lunar and solar third-body effects are only considered if the spacecraft has a period greater than or equal to 225 minutes, as given by Eq. (6.4.1). If this is the case, this spacecraft is classified as a "deep-space" satellite.
 
 $$
-\Omega_{Me} = \left(\Omega_{Me0} + \dot{\Omega}_{Me0} \Delta t\right) \bmod 2\pi \tag{28}
+T_B \ge 225 \text{ min} \quad \text{(deep space, } n_B \le 2\pi / 225 \approx 0.0279253 \text{ rad/min)} \tag{6.4.1}
 $$
 
+The constants used for modeling the orbits and gravitational effects of the Sun and Moon are given in Tables B1 and B2. The time difference between the solar/lunar epoch and the GP element set epoch is defined as $\Delta t = JD_0 - t_{SM}$ in days, where $JD_0$ is the Julian date of the GP element set epoch. We calculate orbital parameters with Eqs. (6.4.2)–(6.4.11).
+
 $$
-\cos i_M = 0.91375164 - 0.03568096 \cos \Omega_{Me} \tag{29}
+\Omega_{Me} = \left(\Omega_{Me0} + \dot{\Omega}_{Me0} \Delta t\right) \bmod 2\pi \tag{6.4.2}
 $$
 
 $$
-\gamma_M = u_{Me0} + \dot{u}_{Me0} \Delta t \tag{30}
+\cos i_M = 0.91375164 - 0.03568096 \cos \Omega_{Me} \tag{6.4.3}
 $$
 
 $$
-\sin \Omega_M = 0.089683511 \frac{\sin \Omega_{Me}}{\sin i_M} \tag{31}
+\gamma_M = u_{Me0} + \dot{u}_{Me0} \Delta t \tag{6.4.4}
 $$
 
 $$
-\Omega_M = \mathrm{atan2}\left(\sin \Omega_M, \cos \Omega_M\right) \tag{32}
+\sin \Omega_M = 0.089683511 \frac{\sin \Omega_{Me}}{\sin i_M} \tag{6.4.5}
 $$
 
 $$
-z_x = \sin i_S \frac{\sin \Omega_{Me}}{\sin i_M} \tag{33}
+\Omega_M = \mathrm{atan2}\left(\sin \Omega_M, \cos \Omega_M\right) \tag{6.4.6}
 $$
 
 $$
-z_y = \cos \Omega_M \cos \Omega_{Me} + \cos i_S \sin \Omega_M \sin \Omega_{Me} \tag{34}
+z_x = \sin i_S \frac{\sin \Omega_{Me}}{\sin i_M} \tag{6.4.7}
 $$
 
 $$
-\omega_M = \gamma_M + \mathrm{atan2}\left(z_x, z_y\right) - \Omega_{Me} \tag{35}
+z_y = \cos \Omega_M \cos \Omega_{Me} + \cos i_S \sin \Omega_M \sin \Omega_{Me} \tag{6.4.8}
 $$
 
 $$
-M_M = \left(M_{M0} + \dot{M}_{M0} \Delta t - \gamma_M\right) \bmod 2\pi \tag{36}
+\omega_M = \gamma_M + \mathrm{atan2}\left(z_x, z_y\right) - \Omega_{Me} \tag{6.4.9}
 $$
 
 $$
-M_S = \left(M_{S0} + \dot{M}_{S0} \Delta t\right) \bmod 2\pi \tag{37}
-$$
-
-#### Step 5. Initialize Earth Half and Whole Day Resonance Effects
-We will define the Earth resonance parameters with Table 8 below.
-
-| Parameter | Symbol | Units | Definition |
-| --- | --- | --- | --- |
-| Greenwich Sidereal Time | $\theta_{g}$ | radians | Greenwich mean sidereal time at the GP element set epoch |
-| Auxiliary Longitude | $\lambda_{0}$ | radians | Resonance angle at epoch |
-| Auxiliary Longitude Rate | $\dot{\lambda}_{0}$ | radians/min | Secular rate of change of the resonance angle, excluding the mean motion $n_B$ |
-| D2201 | $D_{2201}$ | radians/min^2 | Half day resonance coefficient |
-| D2211 | $D_{2211}$ | radians/min^2 | Half day resonance coefficient |
-| D3210 | $D_{3210}$ | radians/min^2 | Half day resonance coefficient |
-| D3222 | $D_{3222}$ | radians/min^2 | Half day resonance coefficient |
-| D4410 | $D_{4410}$ | radians/min^2 | Half day resonance coefficient |
-| D4422 | $D_{4422}$ | radians/min^2 | Half day resonance coefficient |
-| D5220 | $D_{5220}$ | radians/min^2 | Half day resonance coefficient |
-| D5232 | $D_{5232}$ | radians/min^2 | Half day resonance coefficient |
-| D5421 | $D_{5421}$ | radians/min^2 | Half day resonance coefficient |
-| D5433 | $D_{5433}$ | radians/min^2 | Half day resonance coefficient |
-| Delta1 | $\delta_{1}$ | radians/min^2 | Whole day resonance coefficient |
-| Delta2 | $\delta_{2}$ | radians/min^2 | Whole day resonance coefficient |
-| Delta3 | $\delta_{3}$ | radians/min^2 | Whole day resonance coefficient |
-
-<p align="center"><strong>Table 8.</strong> Earth resonance parameters</p>
-
-Satellites whose orbital periods are commensurate with the Earth's rotation experience resonant perturbations from the Earth's tesseral harmonics that do not average out over an orbit. SGP4 models two cases: whole day resonance (geosynchronous orbits with periods near 24 hours) and half day resonance (highly eccentric 12 hour orbits, such as Molniya orbits). mako-sgp4 uses the selection criteria of Vallado et al ([14]) given in eqs 38-39. Both ranges correspond to periods above 225 minutes, so resonance effects only apply to deep space satellites.
-
-$$
-0.0034906585 < n_B < 0.0052359877 \quad \text{(whole day, } 1200 < T_B < 1800 \text{ min)} \tag{38}
+M_M = \left(M_{M0} + \dot{M}_{M0} \Delta t - \gamma_M\right) \bmod 2\pi \tag{6.4.10}
 $$
 
 $$
-8.26 \times 10^{-3} \le n_B \le 9.24 \times 10^{-3} \text{ and } e_B \ge 0.5 \quad \text{(half day, } 680 \lesssim T_B \lesssim 760.7 \text{ min)} \tag{39}
+M_S = \left(M_{S0} + \dot{M}_{S0} \Delta t\right) \bmod 2\pi \tag{6.4.11}
 $$
 
-Both resonances are referenced to the Greenwich mean sidereal time at epoch. This is computed with the IAU-82 model in eqs 40-41, where $T_{UT1}$ is the number of Julian centuries since J2000.0. mako-sgp4 uses the UTC epoch in place of UT1.
+### 6.5 Initialize Earth Half-Day and Whole-Day Resonance Effects
+Implemented in `init_earth_gravity_resonance_halfday`, `init_earth_gravity_resonance_wholeday`, and `calc_theta_g` (`src/sgp4.rs`), stored in `Sgp4.half_day_resonance_params` and `Sgp4.whole_day_resonance_params`.
+
+We will define the Earth resonance parameters with Table 10 below.
+
+| Parameter | Symbol | Units | Definition | Code |
+| --- | --- | --- | --- | --- |
+| Greenwich Sidereal Time | $\theta_{g}$ | radians | Greenwich mean sidereal time at the GP element set epoch | `*_resonance_params.theta_g` |
+| Auxiliary Longitude | $\lambda_{0}$ | radians | Resonance angle at epoch | `*_resonance_params.lam0` |
+| Auxiliary Longitude Rate | $\dot{\lambda}_{0}$ | radians/min | Secular rate of change of the resonance angle, excluding the mean motion $n_B$ | `*_resonance_params.lam0_dot` |
+| D2201 | $D_{2201}$ | radians/min^2 | Half day resonance coefficient | `half_day_resonance_params.d2201` |
+| D2211 | $D_{2211}$ | radians/min^2 | Half day resonance coefficient | `half_day_resonance_params.d2211` |
+| D3210 | $D_{3210}$ | radians/min^2 | Half day resonance coefficient | `half_day_resonance_params.d3210` |
+| D3222 | $D_{3222}$ | radians/min^2 | Half day resonance coefficient | `half_day_resonance_params.d3222` |
+| D4410 | $D_{4410}$ | radians/min^2 | Half day resonance coefficient | `half_day_resonance_params.d4410` |
+| D4422 | $D_{4422}$ | radians/min^2 | Half day resonance coefficient | `half_day_resonance_params.d4422` |
+| D5220 | $D_{5220}$ | radians/min^2 | Half day resonance coefficient | `half_day_resonance_params.d5220` |
+| D5232 | $D_{5232}$ | radians/min^2 | Half day resonance coefficient | `half_day_resonance_params.d5232` |
+| D5421 | $D_{5421}$ | radians/min^2 | Half day resonance coefficient | `half_day_resonance_params.d5421` |
+| D5433 | $D_{5433}$ | radians/min^2 | Half day resonance coefficient | `half_day_resonance_params.d5433` |
+| Delta1 | $\delta_{1}$ | radians/min^2 | Whole day resonance coefficient | `whole_day_resonance_params.delta1` |
+| Delta2 | $\delta_{2}$ | radians/min^2 | Whole day resonance coefficient | `whole_day_resonance_params.delta2` |
+| Delta3 | $\delta_{3}$ | radians/min^2 | Whole day resonance coefficient | `whole_day_resonance_params.delta3` |
+
+<p align="center"><strong>Table 10.</strong> Earth resonance parameters (in the Code column, <code>*</code> is <code>half_day</code> or <code>whole_day</code>)</p>
+
+Satellites whose orbital periods are commensurate with the Earth's rotation experience resonant perturbations from the Earth's tesseral harmonics that do not average out over an orbit. SGP4 models two cases: whole-day resonance (geosynchronous orbits with periods near 24 hours) and half-day resonance (highly eccentric 12-hour orbits, such as Molniya orbits). mako-sgp4 uses the selection criteria of Vallado et al. ([14]) given in Eqs. (6.5.1)–(6.5.2). Both ranges correspond to periods above 225 minutes, so resonance effects only apply to deep-space satellites.
 
 $$
-T_{UT1} = \frac{JD_0 - 2451545.0}{36525} \tag{40}
+0.0034906585 < n_B < 0.0052359877 \quad \text{(whole-day, } 1200 < T_B < 1800 \text{ min)} \tag{6.5.1}
 $$
 
 $$
-\theta_g = \frac{\pi}{180} \cdot \frac{67310.54841 + \left(876600 \cdot 3600 + 8640184.812866\right) T_{UT1} + 0.093104 T_{UT1}^2 - 6.2 \times 10^{-6} T_{UT1}^3}{240} \bmod 2\pi \tag{41}
+8.26 \times 10^{-3} \le n_B \le 9.24 \times 10^{-3} \text{ and } e_B \ge 0.5 \quad \text{(half-day, } 680 \lesssim T_B \lesssim 760.7 \text{ min)} \tag{6.5.2}
+$$
+
+Both resonances are referenced to the Greenwich mean sidereal time at epoch. This is computed with the IAU-82 model in Eqs. (6.5.3)–(6.5.4), where $T_{UT1}$ is the number of Julian centuries since J2000.0. mako-sgp4 uses the UTC epoch in place of UT1.
+
+$$
+T_{UT1} = \frac{JD_0 - 2451545.0}{36525} \tag{6.5.3}
+$$
+
+$$
+\theta_g = \frac{\pi}{180} \cdot \frac{67310.54841 + \left(876600 \cdot 3600 + 8640184.812866\right) T_{UT1} + 0.093104 T_{UT1}^2 - 6.2 \times 10^{-6} T_{UT1}^3}{240} \bmod 2\pi \tag{6.5.4}
 $$
 
 The Earth rotation rate $\dot{\theta}_E$ and the tesseral resonance constants $Q_{lm}$ and $\lambda_{lm}$ are given in Table C1.
 
-For half day resonance, the functions of inclination are given in eqs 42-51.
+For half-day resonance, the functions of inclination are given in Eqs. (6.5.5)–(6.5.14).
 
 $$
-F_{220} = \frac{3}{4} \left(1 + \theta_B\right)^2 \tag{42}
-$$
-
-$$
-F_{221} = \frac{3}{2} \sin^2 i_B \tag{43}
+F_{220} = \frac{3}{4} \left(1 + \theta_B\right)^2 \tag{6.5.5}
 $$
 
 $$
-F_{321} = \frac{15}{8} \sin i_B \left(1 - 2\theta_B - 3\theta_B^2\right) \tag{44}
+F_{221} = \frac{3}{2} \sin^2 i_B \tag{6.5.6}
 $$
 
 $$
-F_{322} = -\frac{15}{8} \sin i_B \left(1 + 2\theta_B - 3\theta_B^2\right) \tag{45}
+F_{321} = \frac{15}{8} \sin i_B \left(1 - 2\theta_B - 3\theta_B^2\right) \tag{6.5.7}
 $$
 
 $$
-F_{441} = \frac{105}{4} \sin^2 i_B \left(1 + \theta_B\right)^2 \tag{46}
+F_{322} = -\frac{15}{8} \sin i_B \left(1 + 2\theta_B - 3\theta_B^2\right) \tag{6.5.8}
 $$
 
 $$
-F_{442} = \frac{315}{8} \sin^4 i_B \tag{47}
+F_{441} = \frac{105}{4} \sin^2 i_B \left(1 + \theta_B\right)^2 \tag{6.5.9}
 $$
 
 $$
-F_{522} = \frac{315}{32} \sin i_B \left[\sin^2 i_B \left(1 - 2\theta_B - 5\theta_B^2\right) - \frac{2}{3} + \frac{4}{3}\theta_B + 2\theta_B^2\right] \tag{48}
+F_{442} = \frac{315}{8} \sin^4 i_B \tag{6.5.10}
 $$
 
 $$
-F_{523} = \frac{105}{16} \sin i_B \left[1 + 2\theta_B - 3\theta_B^2 - \frac{3}{2} \sin^2 i_B \left(1 + 2\theta_B - 5\theta_B^2\right)\right] \tag{49}
+F_{522} = \frac{315}{32} \sin i_B \left[\sin^2 i_B \left(1 - 2\theta_B - 5\theta_B^2\right) - \frac{2}{3} + \frac{4}{3}\theta_B + 2\theta_B^2\right] \tag{6.5.11}
 $$
 
 $$
-F_{542} = \frac{945}{32} \sin i_B \left[2 - 8\theta_B + \theta_B^2 \left(-12 + 8\theta_B + 10\theta_B^2\right)\right] \tag{50}
+F_{523} = \frac{105}{16} \sin i_B \left[1 + 2\theta_B - 3\theta_B^2 - \frac{3}{2} \sin^2 i_B \left(1 + 2\theta_B - 5\theta_B^2\right)\right] \tag{6.5.12}
 $$
 
 $$
-F_{543} = \frac{945}{32} \sin i_B \left[\theta_B^2 \left(12 + 8\theta_B - 10\theta_B^2\right) - 2 - 8\theta_B\right] \tag{51}
-$$
-
-The functions of eccentricity are given below. $G_{201}$ is given as an example by eq 52, and the remaining functions are cubic polynomials in $e_B$ (eq 53) with the coefficients in Table 9.
-
-$$
-G_{201} = -0.306 - 0.44 \left(e_B - 0.64\right) \tag{52}
+F_{542} = \frac{945}{32} \sin i_B \left[2 - 8\theta_B + \theta_B^2 \left(-12 + 8\theta_B + 10\theta_B^2\right)\right] \tag{6.5.13}
 $$
 
 $$
-G_{lpq} = g_0 + g_1 e_B + g_2 e_B^2 + g_3 e_B^3 \tag{53}
+F_{543} = \frac{945}{32} \sin i_B \left[\theta_B^2 \left(12 + 8\theta_B - 10\theta_B^2\right) - 2 - 8\theta_B\right] \tag{6.5.14}
+$$
+
+The functions of eccentricity are given below. $G_{201}$ is given as an example by Eq. (6.5.15), and the remaining functions are cubic polynomials in $e_B$ of the form of Eq. (6.5.16), with the coefficients in Table 11.
+
+$$
+G_{201} = -0.306 - 0.44 \left(e_B - 0.64\right) \tag{6.5.15}
+$$
+
+$$
+G_{lpq} = g_0 + g_1 e_B + g_2 e_B^2 + g_3 e_B^3 \tag{6.5.16}
 $$
 
 | Function | Eccentricity Range | $g_0$ | $g_1$ | $g_2$ | $g_3$ |
@@ -630,124 +722,170 @@ $$
 | $G_{533}$ | $e_B < 0.7$ | -919.2277 | 4988.61 | -9064.77 | 5542.21 |
 | $G_{533}$ | $e_B \ge 0.7$ | -37995.78 | 161616.52 | -229838.2 | 109377.94 |
 
-<p align="center"><strong>Table 9.</strong> Half day resonance eccentricity function coefficients</p>
+<p align="center"><strong>Table 11.</strong> Half day resonance eccentricity function coefficients</p>
 
-The half day resonance coefficients are then given by eqs 54-63. Note that several of the $D_{44pq}$ and $D_{54pq}$ expressions printed in Hoots et al ([9]) contain typos.
-
-$$
-D_{2201} = \frac{3 n_B^2}{a_B^2} Q_{22} F_{220} G_{201} \tag{54}
-$$
+The half-day resonance coefficients are then given by Eqs. (6.5.17)–(6.5.26). Note that several of the $D_{44pq}$ and $D_{54pq}$ expressions printed in Hoots et al. ([9]) contain typos.
 
 $$
-D_{2211} = \frac{3 n_B^2}{a_B^2} Q_{22} F_{221} G_{211} \tag{55}
+D_{2201} = \frac{3 n_B^2}{a_B^2} Q_{22} F_{220} G_{201} \tag{6.5.17}
 $$
 
 $$
-D_{3210} = \frac{3 n_B^2}{a_B^3} Q_{32} F_{321} G_{310} \tag{56}
+D_{2211} = \frac{3 n_B^2}{a_B^2} Q_{22} F_{221} G_{211} \tag{6.5.18}
 $$
 
 $$
-D_{3222} = \frac{3 n_B^2}{a_B^3} Q_{32} F_{322} G_{322} \tag{57}
+D_{3210} = \frac{3 n_B^2}{a_B^3} Q_{32} F_{321} G_{310} \tag{6.5.19}
 $$
 
 $$
-D_{4410} = \frac{6 n_B^2}{a_B^4} Q_{44} F_{441} G_{410} \tag{58}
+D_{3222} = \frac{3 n_B^2}{a_B^3} Q_{32} F_{322} G_{322} \tag{6.5.20}
 $$
 
 $$
-D_{4422} = \frac{6 n_B^2}{a_B^4} Q_{44} F_{442} G_{422} \tag{59}
+D_{4410} = \frac{6 n_B^2}{a_B^4} Q_{44} F_{441} G_{410} \tag{6.5.21}
 $$
 
 $$
-D_{5220} = \frac{3 n_B^2}{a_B^5} Q_{52} F_{522} G_{520} \tag{60}
+D_{4422} = \frac{6 n_B^2}{a_B^4} Q_{44} F_{442} G_{422} \tag{6.5.22}
 $$
 
 $$
-D_{5232} = \frac{3 n_B^2}{a_B^5} Q_{52} F_{523} G_{532} \tag{61}
+D_{5220} = \frac{3 n_B^2}{a_B^5} Q_{52} F_{522} G_{520} \tag{6.5.23}
 $$
 
 $$
-D_{5421} = \frac{6 n_B^2}{a_B^5} Q_{54} F_{542} G_{521} \tag{62}
+D_{5232} = \frac{3 n_B^2}{a_B^5} Q_{52} F_{523} G_{532} \tag{6.5.24}
 $$
 
 $$
-D_{5433} = \frac{6 n_B^2}{a_B^5} Q_{54} F_{543} G_{533} \tag{63}
-$$
-
-The half day auxiliary longitude and its secular rate are given by eqs 64-65. The rate combines the zonal (Table 6) and third body (Table 7) secular rates.
-
-$$
-\lambda_0 = \left(M_B + 2\Omega_B - 2\theta_g\right) \bmod 2\pi \tag{64}
+D_{5421} = \frac{6 n_B^2}{a_B^5} Q_{54} F_{542} G_{521} \tag{6.5.25}
 $$
 
 $$
-\dot{\lambda}_0 = \dot{M}_B + \dot{M}_M + \dot{M}_S + 2\left(\dot{\Omega}_B + \dot{\Omega}_M + \dot{\Omega}_S\right) - 2\dot{\theta}_E \tag{65}
+D_{5433} = \frac{6 n_B^2}{a_B^5} Q_{54} F_{543} G_{533} \tag{6.5.26}
 $$
 
-For whole day resonance, the functions of inclination and eccentricity are given in eqs 66-71. $F_{220}$ is the same function as in the half day resonance (eq 42), and is repeated here for completeness. However, note that the whole day $G_{310}$ (eq 70) is a different function from the half day $G_{310}$ (Table 9), despite sharing the same name. 
+The half-day auxiliary longitude and its secular rate are given by Eqs. (6.5.27)–(6.5.28). The rate combines the zonal (Table 8) and third-body (Table 9) secular rates.
 
 $$
-F_{220} = \frac{3}{4} \left(1 + \theta_B\right)^2 \tag{66}
-$$
-
-$$
-F_{311} = \frac{15}{16} \sin^2 i_B \left(1 + 3\theta_B\right) - \frac{3}{4} \left(1 + \theta_B\right) \tag{67}
+\lambda_0 = \left(M_B + 2\Omega_B - 2\theta_g\right) \bmod 2\pi \tag{6.5.27}
 $$
 
 $$
-F_{330} = \frac{15}{8} \left(1 + \theta_B\right)^3 \tag{68}
+\dot{\lambda}_0 = \dot{M}_B + \dot{M}_M + \dot{M}_S + 2\left(\dot{\Omega}_B + \dot{\Omega}_M + \dot{\Omega}_S\right) - 2\dot{\theta}_E \tag{6.5.28}
+$$
+
+For whole-day resonance, the functions of inclination and eccentricity are given in Eqs. (6.5.29)–(6.5.34). $F_{220}$ is the same function as Eq. (6.5.5) in the half-day resonance, and is repeated here for completeness. However, note that the whole-day $G_{310}$ in Eq. (6.5.33) is a different function from the half-day $G_{310}$ in Table 11, despite sharing the same name. 
+
+$$
+F_{220} = \frac{3}{4} \left(1 + \theta_B\right)^2 \tag{6.5.29}
 $$
 
 $$
-G_{200} = 1 - \frac{5}{2} e_B^2 + \frac{13}{16} e_B^4 \tag{69}
+F_{311} = \frac{15}{16} \sin^2 i_B \left(1 + 3\theta_B\right) - \frac{3}{4} \left(1 + \theta_B\right) \tag{6.5.30}
 $$
 
 $$
-G_{310} = 1 + 2 e_B^2 \tag{70}
+F_{330} = \frac{15}{8} \left(1 + \theta_B\right)^3 \tag{6.5.31}
 $$
 
 $$
-G_{300} = 1 - 6 e_B^2 + \frac{423}{64} e_B^4 \tag{71}
-$$
-
-The whole day resonance coefficients are given by eqs 72-74.
-
-$$
-\delta_1 = \frac{3 n_B^2}{a_B^3} F_{311} G_{310} Q_{31} \tag{72}
+G_{200} = 1 - \frac{5}{2} e_B^2 + \frac{13}{16} e_B^4 \tag{6.5.32}
 $$
 
 $$
-\delta_2 = \frac{6 n_B^2}{a_B^2} F_{220} G_{200} Q_{22} \tag{73}
+G_{310} = 1 + 2 e_B^2 \tag{6.5.33}
 $$
 
 $$
-\delta_3 = \frac{9 n_B^2}{a_B^3} F_{330} G_{300} Q_{33} \tag{74}
+G_{300} = 1 - 6 e_B^2 + \frac{423}{64} e_B^4 \tag{6.5.34}
 $$
 
-Finally, the whole day auxiliary longitude and its secular rate are given by eqs 75-76.
+The whole-day resonance coefficients are given by Eqs. (6.5.35)–(6.5.37).
 
 $$
-\lambda_0 = M_B + \Omega_B + \omega_B - \theta_g \tag{75}
+\delta_1 = \frac{3 n_B^2}{a_B^3} F_{311} G_{310} Q_{31} \tag{6.5.35}
 $$
 
 $$
-\dot{\lambda}_0 = \dot{M}_B + \dot{M}_M + \dot{M}_S + \dot{\Omega}_B + \dot{\Omega}_M + \dot{\Omega}_S + \dot{\omega}_B + \dot{\omega}_M + \dot{\omega}_S - \dot{\theta}_E \tag{76}
+\delta_2 = \frac{6 n_B^2}{a_B^2} F_{220} G_{200} Q_{22} \tag{6.5.36}
 $$
 
-During propagation, $\lambda_0$ and $n_B$ are numerically integrated forward in time using these coefficients (see Propagation step 3).
+$$
+\delta_3 = \frac{9 n_B^2}{a_B^3} F_{330} G_{300} Q_{33} \tag{6.5.37}
+$$
 
-### Propagation
+Finally, the whole-day auxiliary longitude and its secular rate are given by Eqs. (6.5.38)–(6.5.39).
+
+$$
+\lambda_0 = M_B + \Omega_B + \omega_B - \theta_g \tag{6.5.38}
+$$
+
+$$
+\dot{\lambda}_0 = \dot{M}_B + \dot{M}_M + \dot{M}_S + \dot{\Omega}_B + \dot{\Omega}_M + \dot{\Omega}_S + \dot{\omega}_B + \dot{\omega}_M + \dot{\omega}_S - \dot{\theta}_E \tag{6.5.39}
+$$
+
+During propagation, $\lambda_0$ and $n_B$ are numerically integrated forward in time using these coefficients (see Section 7.4).
+
+## 7. Propagation
 Once a time is provided at which to propagate to, the state of the spacecraft can be calculated using the values found in the initialization process (stored in the `Sgp4` struct).
 
 The propagation process can be broken into a series of steps that will be covered individually. These steps are
-1. Account for Earth zonal gravity and partial atmospheric drag effects
-2. Account for Lunar and Solar third body effects
-3. Account for the whole and half day resonance effects of Earth's gravity
-4. Account for remaining atmospheric drag effects
-5. Account for long-period periodic effects of lunar and solar gravity
-6. Account for long-period periodic effects of Earth's gravity
-7. Account for short-period periodic effects of Earth's gravity (solve Kepler's equation)
-8. Calculate position and velocity vectors in the TEME frame
+1. Calculate the time since epoch
+2. Account for Earth zonal gravity and partial atmospheric drag effects
+3. Account for lunar and solar third-body secular effects
+4. Account for Earth half-day and whole-day resonance effects
+5. Account for remaining atmospheric drag effects
+6. Recover the mean elements
+7. Account for long-period periodic effects of lunar and solar gravity
+8. Account for long-period periodic effects of Earth's gravity
+9. Solve Kepler's equation
+10. Account for short-period periodic effects of Earth's gravity
+11. Calculate position and velocity vectors in the TEME frame
+
+### 7.1 Calculate the Time Since Epoch
+Implemented in `sgp4_prop_datetime` (`src/sgp4.rs`).
+
+### 7.2 Account for Earth Zonal Gravity and Partial Atmospheric Drag Effects
+Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
+
+### 7.3 Account for Lunar and Solar Third-Body Secular Effects
+Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
+
+### 7.4 Account for Earth Half-Day and Whole-Day Resonance Effects
+Implemented in `sgp4_prop_delta`, `half_day_euler_maclaurin_step`, and `whole_day_euler_maclaurin_step` (`src/sgp4.rs`).
+
+### 7.5 Account for Remaining Atmospheric Drag Effects
+Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
+
+### 7.6 Recover the Mean Elements
+Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
+
+### 7.7 Account for Long-Period Periodic Effects of Lunar and Solar Gravity
+Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
+
+### 7.8 Account for Long-Period Periodic Effects of Earth's Gravity
+Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
+
+### 7.9 Solve Kepler's Equation
+Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
+
+### 7.10 Account for Short-Period Periodic Effects of Earth's Gravity
+Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
+
+### 7.11 Calculate Position and Velocity Vectors in the TEME Frame
+Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
+
+## 8. Verification
+mako-sgp4 is verified by two reference test suites in the `test/` directory, run by `cargo test`. Each reference state is propagated through both `sgp4_prop_delta` (minutes since epoch) and `sgp4_prop_datetime` (UTC datetime). Each position and velocity component of the state must agree with the reference to within $10^{-6}$ km and $10^{-6}$ km/s (1 mm and 1 mm/s).
+
+| Suite | Source | Cases | Coverage |
+| --- | --- | --- | --- |
+| `test/vallado_cases.toml` | Vallado et al. [14] verification TLEs and ephemerides | 33 | Near-Earth and deep-space orbits, simplified drag, 12-hour and 24-hour resonance, Lyddane low inclination, decay, and an element set that must fail initialization |
+| `test/python-sgp4_cases.toml` | python-sgp4 (WGS-72, improved mode) | 15 | Near-circular, eccentric, sub-220 km perigee, $e_B < 10^{-4}$, Sun-synchronous, near-equatorial, negative $B^*$, high $B^*$, GEO, inclined GEO, Molniya, GPS MEO, GTO, low-inclination GTO over 10 years, and retrograde equatorial ($i_B = 180^\circ$) |
+
+<p align="center"><strong>Table 12.</strong> Verification test suites</p>
 
 ## Appendix A: World Geodetic System (WGS) Models
 
@@ -822,9 +960,9 @@ The propagation process can be broken into a series of steps that will be covere
 | `c44s44` | $Q_{44}$ | - | 7.3636953e-9 | Resonance amplitude of the (4, 4) tesseral harmonic |
 | `c52s52` | $Q_{52}$ | - | 1.1428639e-7 | Resonance amplitude of the (5, 2) tesseral harmonic |
 | `c54s54` | $Q_{54}$ | - | 2.1765803e-9 | Resonance amplitude of the (5, 4) tesseral harmonic |
-| `lam31` | $\lambda_{31}$ | radians | 0.13130908 | Phase angle of the (3, 1) tesseral harmonic (whole day resonance) |
-| `lam22` | $\lambda_{22}$ | radians | 2.88431980 | Phase angle of the (2, 2) tesseral harmonic (whole day resonance) |
-| `lam33` | $\lambda_{33}$ | radians | 0.37448087 | Phase angle of the (3, 3) tesseral harmonic (whole day resonance) |
+| `lam31` | $\lambda_{31}$ | radians | 0.13130908 | Phase angle of the (3, 1) tesseral harmonic (whole-day resonance) |
+| `lam22` | $\lambda_{22}$ | radians | 2.88431980 | Phase angle of the (2, 2) tesseral harmonic (whole-day resonance) |
+| `lam33` | $\lambda_{33}$ | radians | 0.37448087 | Phase angle of the (3, 3) tesseral harmonic (whole-day resonance) |
 
 <p align="center"><strong>Table C1.</strong> Earth resonance constants</p>
 
@@ -833,18 +971,24 @@ If you've found this section, odds are you've read a lot of what has been writte
 
 Thank you!
 
+## Revision History
+
+| Revision | Date | Crate Version | Changes |
+| --- | --- | --- | --- |
+| 1 | 2026-10-04 | 0.2.0 | Initial release: GP element set formats, initialization, verification |
+
 ## References
 - [1] [Solution of the Problem of Artificial Satellite Theory Without Drag by Brouwer](https://ui.adsabs.harvard.edu/abs/1959AJ.....64..378B/abstract)
 - [2] [The Motion of a Close Earth Satellite by Kozai](https://ui.adsabs.harvard.edu/abs/1959AJ.....64..367K/abstract)
-- [3] [Theoretical Evaluation of Atmospheric Drag Effects in the Motion of an Artificial Satellite by Brouwer et al](https://scixplorer.org/abs/1961AJ.....66..193B/abstract)
-- [4] [An Improved Analytical Drag Theory for the Artificial Satellite Problem by Lane et al](https://arc.aiaa.org/doi/abs/10.2514/6.1969-925)
+- [3] [Theoretical Evaluation of Atmospheric Drag Effects in the Motion of an Artificial Satellite by Brouwer et al.](https://scixplorer.org/abs/1961AJ.....66..193B/abstract)
+- [4] [An Improved Analytical Drag Theory for the Artificial Satellite Problem by Lane et al.](https://arc.aiaa.org/doi/abs/10.2514/6.1969-925)
 - [5] [Small Eccentricities or Inclinations in the Brouwer Theory of the Artificial Satellite by Lyddane](https://ui.adsabs.harvard.edu/abs/1963AJ.....68..555L/abstract)
-- [6] [General Perturbations Theories Derived from the 1965 Lane Drag Theory by Lane et al]()
+- [6] [General Perturbations Theories Derived from the 1965 Lane Drag Theory by Lane et al.]()
 - [7] [A First Order Semi-Analytic Perturbation Theory for Highly Eccentric 12 Hour Resonating Satellite Orbits by Bowman]()
 - [8] [A Restricted Four Body Solution for Resonating Satellites Without Drag by Hujsak](https://ui.adsabs.harvard.edu/abs/1979aiaa.confV....H/abstract)
-- [9] [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
+- [9] [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al.](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
 - [10] [The mako-sgp4 Github Repository by Paral](https://github.com/markparal/mako-sgp4)
 - [11] [CelesTrak Frequently Asked Questions: Two-Line Element Set Format by Kelso](https://celestrak.org/columns/v04n03/#FAQ04)
 - [12] [Space Force Alpha-5 Standard for TLEs](https://www.space-track.org/documentation#/tle-alpha5)
 - [13] [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
-- [14] [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
+- [14] [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al.](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
