@@ -460,53 +460,281 @@ We will define the lunar and solar third body parameters with Table 7 below.
 | Argument of Perigee Rate | $\dot{\omega}_{X}$ | radians/min | Secular rate of change of satellite argument of perigee |
 | Right Ascension of Ascending Node Rate | $\dot{\Omega}_{X}$ | radians/min | Secular rate of change of satellite right ascension of the ascending node (RAAN) |
 
-<p align="center"><strong>Table 7.</strong> Lunar and solar third body parameters (subscript $X = M$ for the Moon, $X = S$ for the Sun)</p>
+<p align="center"><strong>Table 7.</strong> Lunar and solar third body parameters (subscript <em>X</em> = <em>M</em> for the Moon, <em>X</em> = <em>S</em> for the Sun)</p>
 
-The lunar and solar third body effects are only considered if the spacecraft has a period greater than or equal to 225 minutes. If this is the case, this spacecraft is classified as a "deep space" satellite.
-
-The constants used for modeling the orbits and gravitational effects of the Sun and Moon are given in Tables B1 and B2. The time difference between the solar/lunar epoch and the GP element set epoch is defined as $\Delta t = JD_0 - t_{SM}$ in days, where $JD_0$ is the Julian date of the GP element set epoch. We calculate orbital parameters with eqs 27-36.
+The lunar and solar third body effects are only considered if the spacecraft has a period greater than or equal to 225 minutes (eq 27). If this is the case, this spacecraft is classified as a "deep space" satellite.
 
 $$
-\Omega_{Me} = \left(\Omega_{Me0} + \dot{\Omega}_{Me0} \Delta t\right) \bmod 2\pi \tag{27}
+T_B \ge 225 \text{ min} \quad \text{(deep space, } n_B \le 2\pi / 225 \approx 0.0279253 \text{ rad/min)} \tag{27}
 $$
 
-$$
-\cos i_M = 0.91375164 - 0.03568096 \cos \Omega_{Me} \tag{28}
-$$
+The constants used for modeling the orbits and gravitational effects of the Sun and Moon are given in Tables B1 and B2. The time difference between the solar/lunar epoch and the GP element set epoch is defined as $\Delta t = JD_0 - t_{SM}$ in days, where $JD_0$ is the Julian date of the GP element set epoch. We calculate orbital parameters with eqs 28-37.
 
 $$
-\gamma_M = u_{Me0} + \dot{u}_{Me0} \Delta t \tag{29}
+\Omega_{Me} = \left(\Omega_{Me0} + \dot{\Omega}_{Me0} \Delta t\right) \bmod 2\pi \tag{28}
 $$
 
 $$
-\sin \Omega_M = 0.089683511 \frac{\sin \Omega_{Me}}{\sin i_M} \tag{30}
+\cos i_M = 0.91375164 - 0.03568096 \cos \Omega_{Me} \tag{29}
 $$
 
 $$
-\Omega_M = \mathrm{atan2}\left(\sin \Omega_M, \cos \Omega_M\right) \tag{31}
+\gamma_M = u_{Me0} + \dot{u}_{Me0} \Delta t \tag{30}
 $$
 
 $$
-z_x = \sin i_S \frac{\sin \Omega_{Me}}{\sin i_M} \tag{32}
+\sin \Omega_M = 0.089683511 \frac{\sin \Omega_{Me}}{\sin i_M} \tag{31}
 $$
 
 $$
-z_y = \cos \Omega_M \cos \Omega_{Me} + \cos i_S \sin \Omega_M \sin \Omega_{Me} \tag{33}
+\Omega_M = \mathrm{atan2}\left(\sin \Omega_M, \cos \Omega_M\right) \tag{32}
 $$
 
 $$
-\omega_M = \gamma_M + \mathrm{atan2}\left(z_x, z_y\right) - \Omega_{Me} \tag{34}
+z_x = \sin i_S \frac{\sin \Omega_{Me}}{\sin i_M} \tag{33}
 $$
 
 $$
-M_M = \left(M_{M0} + \dot{M}_{M0} \Delta t - \gamma_M\right) \bmod 2\pi \tag{35}
+z_y = \cos \Omega_M \cos \Omega_{Me} + \cos i_S \sin \Omega_M \sin \Omega_{Me} \tag{34}
 $$
 
 $$
-M_S = \left(M_{S0} + \dot{M}_{S0} \Delta t\right) \bmod 2\pi \tag{36}
+\omega_M = \gamma_M + \mathrm{atan2}\left(z_x, z_y\right) - \Omega_{Me} \tag{35}
 $$
 
-#### Step 5. Initialize Earth half and whole day resonance effects
+$$
+M_M = \left(M_{M0} + \dot{M}_{M0} \Delta t - \gamma_M\right) \bmod 2\pi \tag{36}
+$$
+
+$$
+M_S = \left(M_{S0} + \dot{M}_{S0} \Delta t\right) \bmod 2\pi \tag{37}
+$$
+
+#### Step 5. Initialize Earth Half and Whole Day Resonance Effects
+We will define the Earth resonance parameters with Table 8 below.
+
+| Parameter | Symbol | Units | Definition |
+| --- | --- | --- | --- |
+| Greenwich Sidereal Time | $\theta_{g}$ | radians | Greenwich mean sidereal time at the GP element set epoch |
+| Auxiliary Longitude | $\lambda_{0}$ | radians | Resonance angle at epoch |
+| Auxiliary Longitude Rate | $\dot{\lambda}_{0}$ | radians/min | Secular rate of change of the resonance angle, excluding the mean motion $n_B$ |
+| D2201 | $D_{2201}$ | radians/min^2 | Half day resonance coefficient |
+| D2211 | $D_{2211}$ | radians/min^2 | Half day resonance coefficient |
+| D3210 | $D_{3210}$ | radians/min^2 | Half day resonance coefficient |
+| D3222 | $D_{3222}$ | radians/min^2 | Half day resonance coefficient |
+| D4410 | $D_{4410}$ | radians/min^2 | Half day resonance coefficient |
+| D4422 | $D_{4422}$ | radians/min^2 | Half day resonance coefficient |
+| D5220 | $D_{5220}$ | radians/min^2 | Half day resonance coefficient |
+| D5232 | $D_{5232}$ | radians/min^2 | Half day resonance coefficient |
+| D5421 | $D_{5421}$ | radians/min^2 | Half day resonance coefficient |
+| D5433 | $D_{5433}$ | radians/min^2 | Half day resonance coefficient |
+| Delta1 | $\delta_{1}$ | radians/min^2 | Whole day resonance coefficient |
+| Delta2 | $\delta_{2}$ | radians/min^2 | Whole day resonance coefficient |
+| Delta3 | $\delta_{3}$ | radians/min^2 | Whole day resonance coefficient |
+
+<p align="center"><strong>Table 8.</strong> Earth resonance parameters</p>
+
+Satellites whose orbital periods are commensurate with the Earth's rotation experience resonant perturbations from the Earth's tesseral harmonics that do not average out over an orbit. SGP4 models two cases: whole day resonance (geosynchronous orbits with periods near 24 hours) and half day resonance (highly eccentric 12 hour orbits, such as Molniya orbits). mako-sgp4 uses the selection criteria of Vallado et al ([14]) given in eqs 38-39. Both ranges correspond to periods above 225 minutes, so resonance effects only apply to deep space satellites.
+
+$$
+0.0034906585 < n_B < 0.0052359877 \quad \text{(whole day, } 1200 < T_B < 1800 \text{ min)} \tag{38}
+$$
+
+$$
+8.26 \times 10^{-3} \le n_B \le 9.24 \times 10^{-3} \text{ and } e_B \ge 0.5 \quad \text{(half day, } 680 \lesssim T_B \lesssim 760.7 \text{ min)} \tag{39}
+$$
+
+Both resonances are referenced to the Greenwich mean sidereal time at epoch. This is computed with the IAU-82 model in eqs 40-41, where $T_{UT1}$ is the number of Julian centuries since J2000.0. mako-sgp4 uses the UTC epoch in place of UT1.
+
+$$
+T_{UT1} = \frac{JD_0 - 2451545.0}{36525} \tag{40}
+$$
+
+$$
+\theta_g = \frac{\pi}{180} \cdot \frac{67310.54841 + \left(876600 \cdot 3600 + 8640184.812866\right) T_{UT1} + 0.093104 T_{UT1}^2 - 6.2 \times 10^{-6} T_{UT1}^3}{240} \bmod 2\pi \tag{41}
+$$
+
+The Earth rotation rate $\dot{\theta}_E$ and the tesseral resonance constants $Q_{lm}$ and $\lambda_{lm}$ are given in Table C1.
+
+For half day resonance, the functions of inclination are given in eqs 42-51.
+
+$$
+F_{220} = \frac{3}{4} \left(1 + \theta_B\right)^2 \tag{42}
+$$
+
+$$
+F_{221} = \frac{3}{2} \sin^2 i_B \tag{43}
+$$
+
+$$
+F_{321} = \frac{15}{8} \sin i_B \left(1 - 2\theta_B - 3\theta_B^2\right) \tag{44}
+$$
+
+$$
+F_{322} = -\frac{15}{8} \sin i_B \left(1 + 2\theta_B - 3\theta_B^2\right) \tag{45}
+$$
+
+$$
+F_{441} = \frac{105}{4} \sin^2 i_B \left(1 + \theta_B\right)^2 \tag{46}
+$$
+
+$$
+F_{442} = \frac{315}{8} \sin^4 i_B \tag{47}
+$$
+
+$$
+F_{522} = \frac{315}{32} \sin i_B \left[\sin^2 i_B \left(1 - 2\theta_B - 5\theta_B^2\right) - \frac{2}{3} + \frac{4}{3}\theta_B + 2\theta_B^2\right] \tag{48}
+$$
+
+$$
+F_{523} = \frac{105}{16} \sin i_B \left[1 + 2\theta_B - 3\theta_B^2 - \frac{3}{2} \sin^2 i_B \left(1 + 2\theta_B - 5\theta_B^2\right)\right] \tag{49}
+$$
+
+$$
+F_{542} = \frac{945}{32} \sin i_B \left[2 - 8\theta_B + \theta_B^2 \left(-12 + 8\theta_B + 10\theta_B^2\right)\right] \tag{50}
+$$
+
+$$
+F_{543} = \frac{945}{32} \sin i_B \left[\theta_B^2 \left(12 + 8\theta_B - 10\theta_B^2\right) - 2 - 8\theta_B\right] \tag{51}
+$$
+
+The functions of eccentricity are given below. $G_{201}$ is given as an example by eq 52, and the remaining functions are cubic polynomials in $e_B$ (eq 53) with the coefficients in Table 9.
+
+$$
+G_{201} = -0.306 - 0.44 \left(e_B - 0.64\right) \tag{52}
+$$
+
+$$
+G_{lpq} = g_0 + g_1 e_B + g_2 e_B^2 + g_3 e_B^3 \tag{53}
+$$
+
+| Function | Eccentricity Range | $g_0$ | $g_1$ | $g_2$ | $g_3$ |
+| --- | --- | --- | --- | --- | --- |
+| $G_{211}$ | $e_B \le 0.65$ | 3.616 | -13.247 | 16.29 | 0 |
+| $G_{211}$ | $e_B > 0.65$ | -72.099 | 331.819 | -508.738 | 266.724 |
+| $G_{310}$ | $e_B \le 0.65$ | -19.302 | 117.39 | -228.419 | 156.591 |
+| $G_{310}$ | $e_B > 0.65$ | -346.844 | 1582.851 | -2415.925 | 1246.113 |
+| $G_{322}$ | $e_B \le 0.65$ | -18.9068 | 109.7927 | -214.6334 | 146.5816 |
+| $G_{322}$ | $e_B > 0.65$ | -342.585 | 1554.908 | -2366.899 | 1215.972 |
+| $G_{410}$ | $e_B \le 0.65$ | -41.122 | 242.694 | -471.094 | 313.953 |
+| $G_{410}$ | $e_B > 0.65$ | -1052.797 | 4758.686 | -7193.992 | 3651.957 |
+| $G_{422}$ | $e_B \le 0.65$ | -146.407 | 841.88 | -1629.014 | 1083.435 |
+| $G_{422}$ | $e_B > 0.65$ | -3581.69 | 16178.11 | -24462.77 | 12422.52 |
+| $G_{520}$ | $e_B \le 0.65$ | -532.114 | 3017.977 | -5740.032 | 3708.276 |
+| $G_{520}$ | $0.65 < e_B < 0.715$ | 1464.74 | -4664.75 | 3763.64 | 0 |
+| $G_{520}$ | $e_B \ge 0.715$ | -5149.66 | 29936.92 | -54087.36 | 31324.56 |
+| $G_{521}$ | $e_B < 0.7$ | -822.71072 | 4568.6173 | -8491.4146 | 5337.524 |
+| $G_{521}$ | $e_B \ge 0.7$ | -51752.104 | 218913.95 | -309468.16 | 146349.42 |
+| $G_{532}$ | $e_B < 0.7$ | -853.666 | 4690.25 | -8624.77 | 5341.4 |
+| $G_{532}$ | $e_B \ge 0.7$ | -40023.88 | 170470.89 | -242699.48 | 115605.82 |
+| $G_{533}$ | $e_B < 0.7$ | -919.2277 | 4988.61 | -9064.77 | 5542.21 |
+| $G_{533}$ | $e_B \ge 0.7$ | -37995.78 | 161616.52 | -229838.2 | 109377.94 |
+
+<p align="center"><strong>Table 9.</strong> Half day resonance eccentricity function coefficients</p>
+
+The half day resonance coefficients are then given by eqs 54-63. Note that several of the $D_{44pq}$ and $D_{54pq}$ expressions printed in Hoots et al ([9]) contain typos.
+
+$$
+D_{2201} = \frac{3 n_B^2}{a_B^2} Q_{22} F_{220} G_{201} \tag{54}
+$$
+
+$$
+D_{2211} = \frac{3 n_B^2}{a_B^2} Q_{22} F_{221} G_{211} \tag{55}
+$$
+
+$$
+D_{3210} = \frac{3 n_B^2}{a_B^3} Q_{32} F_{321} G_{310} \tag{56}
+$$
+
+$$
+D_{3222} = \frac{3 n_B^2}{a_B^3} Q_{32} F_{322} G_{322} \tag{57}
+$$
+
+$$
+D_{4410} = \frac{6 n_B^2}{a_B^4} Q_{44} F_{441} G_{410} \tag{58}
+$$
+
+$$
+D_{4422} = \frac{6 n_B^2}{a_B^4} Q_{44} F_{442} G_{422} \tag{59}
+$$
+
+$$
+D_{5220} = \frac{3 n_B^2}{a_B^5} Q_{52} F_{522} G_{520} \tag{60}
+$$
+
+$$
+D_{5232} = \frac{3 n_B^2}{a_B^5} Q_{52} F_{523} G_{532} \tag{61}
+$$
+
+$$
+D_{5421} = \frac{6 n_B^2}{a_B^5} Q_{54} F_{542} G_{521} \tag{62}
+$$
+
+$$
+D_{5433} = \frac{6 n_B^2}{a_B^5} Q_{54} F_{543} G_{533} \tag{63}
+$$
+
+The half day auxiliary longitude and its secular rate are given by eqs 64-65. The rate combines the zonal (Table 6) and third body (Table 7) secular rates.
+
+$$
+\lambda_0 = \left(M_B + 2\Omega_B - 2\theta_g\right) \bmod 2\pi \tag{64}
+$$
+
+$$
+\dot{\lambda}_0 = \dot{M}_B + \dot{M}_M + \dot{M}_S + 2\left(\dot{\Omega}_B + \dot{\Omega}_M + \dot{\Omega}_S\right) - 2\dot{\theta}_E \tag{65}
+$$
+
+For whole day resonance, the functions of inclination and eccentricity are given in eqs 66-71. $F_{220}$ is the same function as in the half day resonance (eq 42), and is repeated here for completeness. However, note that the whole day $G_{310}$ (eq 70) is a different function from the half day $G_{310}$ (Table 9), despite sharing the same name. 
+
+$$
+F_{220} = \frac{3}{4} \left(1 + \theta_B\right)^2 \tag{66}
+$$
+
+$$
+F_{311} = \frac{15}{16} \sin^2 i_B \left(1 + 3\theta_B\right) - \frac{3}{4} \left(1 + \theta_B\right) \tag{67}
+$$
+
+$$
+F_{330} = \frac{15}{8} \left(1 + \theta_B\right)^3 \tag{68}
+$$
+
+$$
+G_{200} = 1 - \frac{5}{2} e_B^2 + \frac{13}{16} e_B^4 \tag{69}
+$$
+
+$$
+G_{310} = 1 + 2 e_B^2 \tag{70}
+$$
+
+$$
+G_{300} = 1 - 6 e_B^2 + \frac{423}{64} e_B^4 \tag{71}
+$$
+
+The whole day resonance coefficients are given by eqs 72-74.
+
+$$
+\delta_1 = \frac{3 n_B^2}{a_B^3} F_{311} G_{310} Q_{31} \tag{72}
+$$
+
+$$
+\delta_2 = \frac{6 n_B^2}{a_B^2} F_{220} G_{200} Q_{22} \tag{73}
+$$
+
+$$
+\delta_3 = \frac{9 n_B^2}{a_B^3} F_{330} G_{300} Q_{33} \tag{74}
+$$
+
+Finally, the whole day auxiliary longitude and its secular rate are given by eqs 75-76.
+
+$$
+\lambda_0 = M_B + \Omega_B + \omega_B - \theta_g \tag{75}
+$$
+
+$$
+\dot{\lambda}_0 = \dot{M}_B + \dot{M}_M + \dot{M}_S + \dot{\Omega}_B + \dot{\Omega}_M + \dot{\Omega}_S + \dot{\omega}_B + \dot{\omega}_M + \dot{\omega}_S - \dot{\theta}_E \tag{76}
+$$
+
+During propagation, $\lambda_0$ and $n_B$ are numerically integrated forward in time using these coefficients (see Propagation step 3).
 
 ### Propagation
 Once a time is provided at which to propagate to, the state of the spacecraft can be calculated using the values found in the initialization process (stored in the `Sgp4` struct).
@@ -520,7 +748,6 @@ The propagation process can be broken into a series of steps that will be covere
 6. Account for long-period periodic effects of Earth's gravity
 7. Account for short-period periodic effects of Earth's gravity (solve Kepler's equation)
 8. Calculate position and velocity vectors in the TEME frame
-
 
 ## Appendix A: World Geodetic System (WGS) Models
 
@@ -582,6 +809,24 @@ The propagation process can be broken into a series of steps that will be covere
 | `m_m0_dot` | $\dot{M}_{M0}$ | radians/day | 0.22997150 | Lunar mean anomaly time rate of change at the lunar/solar element epoch |
 
 <p align="center"><strong>Table B2.</strong> Lunar model constants</p>
+
+## Appendix C: Constants for Earth Resonance
+
+| Variable | Symbol | Units | Value | Description |
+| --- | --- | --- | --- | --- |
+| `RPTIM` | $\dot{\theta}_{E}$ | radians/min | 4.3752690880113e-3 | Earth's rotation rate |
+| `c22s22`, `q22` | $Q_{22}$ | - | 1.7891679e-6 | Resonance amplitude of the (2, 2) tesseral harmonic |
+| `q31` | $Q_{31}$ | - | 2.1460748e-6 | Resonance amplitude of the (3, 1) tesseral harmonic |
+| `c32s32` | $Q_{32}$ | - | 3.7393792e-7 | Resonance amplitude of the (3, 2) tesseral harmonic |
+| `q33` | $Q_{33}$ | - | 2.2123015e-7 | Resonance amplitude of the (3, 3) tesseral harmonic |
+| `c44s44` | $Q_{44}$ | - | 7.3636953e-9 | Resonance amplitude of the (4, 4) tesseral harmonic |
+| `c52s52` | $Q_{52}$ | - | 1.1428639e-7 | Resonance amplitude of the (5, 2) tesseral harmonic |
+| `c54s54` | $Q_{54}$ | - | 2.1765803e-9 | Resonance amplitude of the (5, 4) tesseral harmonic |
+| `lam31` | $\lambda_{31}$ | radians | 0.13130908 | Phase angle of the (3, 1) tesseral harmonic (whole day resonance) |
+| `lam22` | $\lambda_{22}$ | radians | 2.88431980 | Phase angle of the (2, 2) tesseral harmonic (whole day resonance) |
+| `lam33` | $\lambda_{33}$ | radians | 0.37448087 | Phase angle of the (3, 3) tesseral harmonic (whole day resonance) |
+
+<p align="center"><strong>Table C1.</strong> Earth resonance constants</p>
 
 ## Thanks
 If you've found this section, odds are you've read a lot of what has been written here and made use of mako-sgp4. This has been a passion project of mine for a while, and a lot of hard work went into building this up to the state you see today. I'd like to extend my appreciation to you, the reader, for your attention to this work. I've learned a lot in the process of crafting this codebase, and I hope you've found it useful as well. 
