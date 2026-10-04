@@ -524,6 +524,9 @@ pub enum Sgp4Error {
 
     /// Epoch or propagation datetime could not be converted to Julian date
     InvalidDateTime(DateError),
+
+    /// Propagated position or velocity is not finite (NaN or infinite)
+    NonFiniteState,
 }
 
 // ------
@@ -581,6 +584,7 @@ const RPTIM: f64 = 4.375_269_088_011_3e-3;
 /// * [`Sgp4Error::InvalidPerturbedEccentricity`] - If perturbed eccentricity is outside the range 0.0 to 1.0
 /// * [`Sgp4Error::InvalidSemilatusRectum`] - If the semilatus rectum is less than zero
 /// * [`Sgp4Error::SatelliteDecayed`] - If the satellite has decayed
+/// * [`Sgp4Error::NonFiniteState`] - If the propagated state is NaN or infinite
 ///
 /// # Examples
 /// ```rust
@@ -1444,6 +1448,7 @@ fn calc_theta_g(jd0: f64, jdfrac0: f64) -> f64 {
 /// * [`Sgp4Error::InvalidPerturbedEccentricity`] - If perturbed eccentricity is outside the range 0.0 to 1.0
 /// * [`Sgp4Error::InvalidSemilatusRectum`] - If the semilatus rectum is less than zero
 /// * [`Sgp4Error::SatelliteDecayed`] - If the satellite has decayed
+/// * [`Sgp4Error::NonFiniteState`] - If the propagated state is NaN or infinite
 ///
 /// # Examples
 /// ```rust
@@ -1500,6 +1505,7 @@ pub fn sgp4_prop_datetime(sgp4: &Sgp4, datetime: &DateTime) -> Result<StateVecto
 /// * [`Sgp4Error::InvalidPerturbedEccentricity`] - If perturbed eccentricity is outside the range 0.0 to 1.0
 /// * [`Sgp4Error::InvalidSemilatusRectum`] - If the semilatus rectum is less than zero
 /// * [`Sgp4Error::SatelliteDecayed`] - If the satellite has decayed
+/// * [`Sgp4Error::NonFiniteState`] - If the propagated state is NaN or infinite
 ///
 /// # Examples
 /// ```rust
@@ -1662,6 +1668,7 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> Result<StateVector, Sgp4Err
         let a_1 = 1. - sgp4.atm_params.c1 * delta_t - sgp4.atm_params.d2 * delta_t.powi(2);
         let a_2 = -sgp4.atm_params.d3 * delta_t.powi(3) - sgp4.atm_params.d4 * delta_t.powi(4);
         a = (sgp4.wgs.ke / n).powf(2. / 3.) * (a_1 + a_2).powi(2);
+        n = sgp4.wgs.ke / a.powf(1.5);
         let il_1 = 3. / 2. * sgp4.atm_params.c1 * delta_t.powi(2);
         let il_2 = (sgp4.atm_params.d2 + 2. * sgp4.atm_params.c1.powi(2)) * delta_t.powi(3);
         let il_3 = 1. / 4.
@@ -1688,6 +1695,14 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> Result<StateVector, Sgp4Err
     if e < 1.0e-6 {
         e = 1.0e-6;
     }
+
+    // Vallado mean-element recovery before lunar-solar periodics. Use `%` (C fmod, keeps sign)
+    // so the Lyddane node continuity check below sees the same wrapped angles as Vallado
+    m += il_atm;
+    let lm = (m + omega + raan) % (2.0 * PI);
+    raan %= 2.0 * PI;
+    omega %= 2.0 * PI;
+    m = (lm - omega - raan) % (2.0 * PI);
 
     // Account for long-period periodic effects of lunar and solar gravity
     if sgp4.deep_space {
@@ -1796,24 +1811,22 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> Result<StateVector, Sgp4Err
         omega -= PI;
     }
 
-    // Vallado mean-element recovery before long-period periodics
-    m += il_atm;
-    let mut lm = m + omega + raan;
-    raan = raan.rem_euclid(2.0 * PI);
-    omega = omega.rem_euclid(2.0 * PI);
-    lm = lm.rem_euclid(2.0 * PI);
-    m = (lm - omega - raan).rem_euclid(2.0 * PI);
     let il = m + omega + raan;
 
     // Account for long-period periodic effects of Earth's gravity
     let beta_update = (1. - e.powi(2)).sqrt();
     let a30 = -sgp4.wgs.j3; // [Earth Radii^3]
     let axn = e * omega.cos();
+    // Vallado floor on 1 + cos(i) so retrograde equatorial orbits (i = 180 deg) do not divide by zero
+    let mut one_plus_cos_i = 1. + i.cos();
+    if one_plus_cos_i.abs() < 1.5e-12 {
+        one_plus_cos_i = 1.5e-12;
+    }
     let ill = a30 * i.sin() / (8. * sgp4.wgs.k2 * a * beta_update.powi(2))
         * e
         * omega.cos()
         * (3. + 5. * i.cos())
-        / (1. + i.cos());
+        / one_plus_cos_i;
     let aynl = a30 * i.sin() / (4. * sgp4.wgs.k2 * a * beta_update.powi(2));
     let ilt = il + ill;
     let ayn = e * omega.sin() + aynl;
@@ -1905,6 +1918,14 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> Result<StateVector, Sgp4Err
     let r_dot_x = (r_dot_k * ux + r_f_dot_k * vx) * sgp4.wgs.r_earth_eq / 60.;
     let r_dot_y = (r_dot_k * uy + r_f_dot_k * vy) * sgp4.wgs.r_earth_eq / 60.;
     let r_dot_z = (r_dot_k * uz + r_f_dot_k * vz) * sgp4.wgs.r_earth_eq / 60.;
+
+    // Never return a non-finite state as a success
+    if ![rx, ry, rz, r_dot_x, r_dot_y, r_dot_z]
+        .iter()
+        .all(|x| x.is_finite())
+    {
+        return Err(Sgp4Error::NonFiniteState);
+    }
 
     Ok(StateVector {
         r_x: rx,
@@ -2229,8 +2250,8 @@ mod tests {
         }
     }
 
-    // Sub-meter agreement with Vallado reference ephemerides, in km and km/s.
-    const VALLADO_STATE_TOL_KM: f64 = 1e-3;
+    // Agreement with Vallado reference ephemerides to 1e-6 km (1 mm) and 1e-6 km/s (1 mm/s).
+    const VALLADO_STATE_TOL_KM: f64 = 1e-6;
 
     /// Compare a propagated state with one Vallado ephemeris row
     ///
@@ -2442,6 +2463,21 @@ mod tests {
         ));
     }
 
+    /// Non-finite states are returned as errors
+    ///
+    /// # Panics
+    /// * If a NaN state is returned as Ok
+    #[test]
+    fn test_non_finite_state() {
+        let mut sgp4 = iss_sgp4();
+        sgp4.brouwer0.i = f64::NAN;
+
+        assert!(matches!(
+            sgp4_prop_delta(&sgp4, 0.0),
+            Err(Sgp4Error::NonFiniteState)
+        ));
+    }
+
     /// Compare propagation with the Vallado reference ephemerides
     ///
     /// Each non-exception TLE is propagated with both minutes from epoch and
@@ -2572,11 +2608,11 @@ mod tests {
         vz_teme_m_per_s: Vec<f64>,
     }
 
-    // A position component passes when it differs by less than 1 meter.
-    const PYTHON_SGP4_POS_TOL_M: f64 = 1.0;
+    // A position component passes when it differs by less than 1e-6 km (1 millimeter).
+    const PYTHON_SGP4_POS_TOL_M: f64 = 1e-3;
 
-    // A velocity component passes when it differs by less than 1 meter per second.
-    const PYTHON_SGP4_VEL_TOL_M_S: f64 = 1.0;
+    // A velocity component passes when it differs by less than 1e-6 km/s (1 millimeter per second).
+    const PYTHON_SGP4_VEL_TOL_M_S: f64 = 1e-3;
 
     /// Parse an ISO-8601 UTC timestamp with a fractional second
     ///

@@ -24,7 +24,7 @@ use csv::{ReaderBuilder, WriterBuilder};
 // Internal Libraries
 // ------------------
 use crate::sgp4::{Sgp4, Sgp4Error, init_sgp4};
-use crate::time::{DateTime, Timezone, dayofyr2utc};
+use crate::time::{DateTime, Timezone, dayofyr2utc, validate_datetime};
 
 // -------
 // Structs
@@ -106,6 +106,9 @@ pub struct GenPerturbElementSet {
 
     /// Revolution number at epoch \[revs\]
     pub revolution_number_at_epoch: i64,
+
+    /// TLE checksum result
+    pub tle_checksum_valid: Option<bool>,
 }
 
 // -----
@@ -317,8 +320,8 @@ const OMM_CSV_HEADERS: [&str; 17] = [
 ///
 /// # Errors
 /// * [`GpError::InvalidTleLine0`] - If the optional name line is empty or longer than 24 characters
-/// * [`GpError::InvalidTleLine1`] - If line 1 is not 69 characters or a field cannot be parsed
-/// * [`GpError::InvalidTleLine2`] - If line 2 is not 69 characters or a field cannot be parsed
+/// * [`GpError::InvalidTleLine1`] - If line 1 is not 69 ASCII characters, does not start with `1 `, or a field cannot be parsed
+/// * [`GpError::InvalidTleLine2`] - If line 2 is not 69 ASCII characters, does not start with `2 `, or a field cannot be parsed
 /// * [`GpError::InvalidTleEpoch`] - If the epoch cannot be converted to a UTC datetime
 /// * [`GpError::MismatchedTleCatalog`] - If line 1 and line 2 have different NORAD catalog numbers
 /// * [`GpError::Sgp4`] - If SGP4 initialization fails
@@ -354,20 +357,19 @@ pub fn from_tle_lines(line1: &str, line2: &str, line0: Option<&str>) -> Result<S
         gp.common_name = name_line.to_string();
     }
 
-    // Line 1 must be 69 characters before field slices or checksum
-    if line1.len() != 69 {
+    // Line 1 must be 69 ASCII characters, starting with '1 ', before field slices or checksum
+    if line1.len() != 69 || !line1.is_ascii() || !line1.starts_with("1 ") {
         return Err(GpError::InvalidTleLine1);
     }
 
-    // Line 2 must be 69 characters before field slices or checksum
-    if line2.len() != 69 {
+    // Line 2 must be 69 ASCII characters, starting with '2 ', before field slices or checksum
+    if line2.len() != 69 || !line2.is_ascii() || !line2.starts_with("2 ") {
         return Err(GpError::InvalidTleLine2);
     }
 
-    // Validate the TLE checksum. A mismatch is a warning, not an error.
-    if !tle_checksum(line1) || !tle_checksum(line2) {
-        eprintln!("warning: TLE checksum failed; continuing with parse");
-    }
+    // Validate the TLE checksum. A mismatch is a warning, not an error, and is reported
+    // through `tle_checksum_valid`
+    gp.tle_checksum_valid = Some(tle_checksum(line1) && tle_checksum(line2));
 
     // Satellite catalog number from line 1
     gp.satellite_catalog_number =
@@ -1656,6 +1658,7 @@ where
         mean_anomaly: omm_typed_value(lookup("MEAN_ANOMALY"), "MEAN_ANOMALY")?,
         mean_motion: omm_typed_value(lookup("MEAN_MOTION"), "MEAN_MOTION")?,
         revolution_number_at_epoch: omm_typed_value(lookup("REV_AT_EPOCH"), "REV_AT_EPOCH")?,
+        tle_checksum_valid: None,
     };
 
     // Initialize the SGP4 parameters
@@ -3376,7 +3379,7 @@ fn parse_omm_epoch(epoch: &str) -> Result<DateTime, GpError> {
         .parse::<f64>()
         .map_err(|_| GpError::InvalidOmmEpoch)?;
 
-    Ok(DateTime {
+    let datetime = DateTime {
         year,
         month,
         day,
@@ -3384,7 +3387,12 @@ fn parse_omm_epoch(epoch: &str) -> Result<DateTime, GpError> {
         minute,
         second,
         timezone: Timezone::UTC,
-    })
+    };
+
+    // Reject out-of-range calendar or clock fields (e.g. month 13 or hour 25)
+    validate_datetime(&datetime).map_err(|_| GpError::InvalidOmmEpoch)?;
+
+    Ok(datetime)
 }
 
 // ----------
@@ -3554,6 +3562,22 @@ mod tests {
             Ok(_) => panic!("expected InvalidOmmEpoch"),
         };
         assert_eq!(err, GpError::InvalidOmmEpoch);
+
+        // Out-of-range calendar and clock fields
+        for epoch in [
+            "2026-13-01T00:00:00",
+            "2026-02-29T00:00:00",
+            "2026-06-31T00:00:00",
+            "2026-06-14T24:00:00",
+            "2026-06-14T00:60:00",
+            "2026-06-14T00:00:61.0",
+        ] {
+            let err = match from_omm_kvn_string(&format!("EPOCH = {epoch}\nMEAN_MOTION = 15.0")) {
+                Err(err) => err,
+                Ok(_) => panic!("expected InvalidOmmEpoch for {epoch}"),
+            };
+            assert_eq!(err, GpError::InvalidOmmEpoch, "{epoch}");
+        }
     }
 
     /// Reject OMM XML that is not a document
@@ -3699,6 +3723,68 @@ mod tests {
         // Assert the checksum is correct
         assert!(checksum);
         assert!(!checksum2);
+    }
+
+    /// Report a TLE checksum mismatch as a warning, not an error
+    ///
+    /// # Panics
+    /// * If a bad checksum fails the parse or is not flagged, or a good one is flagged
+    #[test]
+    fn test_tle_checksum_warning() {
+        let line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
+        let line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+        let bad_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2922";
+
+        let sgp4 = from_tle_lines(line1, line2, None).expect("valid TLE should parse");
+        assert_eq!(sgp4.gp.tle_checksum_valid, Some(true));
+
+        let sgp4 = from_tle_lines(bad_line1, line2, None).expect("bad checksum should still parse");
+        assert_eq!(sgp4.gp.tle_checksum_valid, Some(false));
+    }
+
+    /// Reject TLE data lines with the wrong line number or non-ASCII characters
+    ///
+    /// # Panics
+    /// * If a bad line is accepted or slicing a non-ASCII line panics
+    #[test]
+    fn test_invalid_tle_line_prefix_and_ascii() {
+        let line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
+        let line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+
+        // Wrong line number digits, swapped lines, and a missing separator space
+        let bad_line1 = line1.replacen('1', "3", 1);
+        let bad_line2 = line2.replacen('2', "3", 1);
+        let no_space_line1 = format!("10{}", &line1[2..]);
+        assert!(matches!(
+            from_tle_lines(&bad_line1, line2, None),
+            Err(GpError::InvalidTleLine1)
+        ));
+        assert!(matches!(
+            from_tle_lines(line1, &bad_line2, None),
+            Err(GpError::InvalidTleLine2)
+        ));
+        assert!(matches!(
+            from_tle_lines(line2, line1, None),
+            Err(GpError::InvalidTleLine1)
+        ));
+        assert!(matches!(
+            from_tle_lines(&no_space_line1, line2, None),
+            Err(GpError::InvalidTleLine1)
+        ));
+
+        // 69-byte lines with a multibyte character across a field boundary
+        let utf8_line1 = format!("{}\u{e9}{}", &line1[..62], &line1[64..]);
+        let utf8_line2 = format!("{}\u{e9}{}", &line2[..15], &line2[17..]);
+        assert_eq!(utf8_line1.len(), 69);
+        assert_eq!(utf8_line2.len(), 69);
+        assert!(matches!(
+            from_tle_lines(&utf8_line1, line2, None),
+            Err(GpError::InvalidTleLine1)
+        ));
+        assert!(matches!(
+            from_tle_lines(line1, &utf8_line2, None),
+            Err(GpError::InvalidTleLine2)
+        ));
     }
 
     // -------------------------------------------------------
