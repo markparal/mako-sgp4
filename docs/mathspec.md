@@ -1,11 +1,11 @@
 # mako-sgp4: Math Specification
 **By [Mark Paral](https://markparal.com/)**
 
-**Abstract.** This document outlines the mathematics implemented by [mako-sgp4](https://github.com/markparal/mako-sgp4), a Rust implementation of the SGP4/SDP4 orbit propagator. It describes the general perturbation (GP) element set formats the crate ingests (TLE and OMM), the equations used to initialize the propagator, and the equations used to propagate the satellite state to a requested time. References to the source code are made throughout as this document is intended to be read alongside the code. The implementation follows the theory of Hoots et al. with the practical corrections of Vallado et al., and it is verified against both reference implementations to within 1 mm in position and 1 mm/s in velocity.
-
 <p align="center">
   <img src="../assets/logo_dark.png" alt="mako-sgp4 logo" width="240">
 </p>
+
+**Abstract.** This document outlines the mathematics implemented by [mako-sgp4](https://github.com/markparal/mako-sgp4), a Rust implementation of the SGP4/SDP4 orbit propagator. It describes the general perturbation (GP) element set formats the crate ingests (TLE and OMM), the equations used to initialize the propagator, and the equations used to propagate the satellite state to a requested time. References to the source code are made throughout as this document is intended to be read alongside the code. The implementation follows the theory of Hoots et al. with the practical corrections of Vallado et al., and it is verified against both reference implementations to within 1 mm in position and 1 mm/s in velocity.
 
 ## Table of Contents
 - [1. Introduction](#1-introduction)
@@ -247,6 +247,7 @@ Unless stated otherwise, the equations in Sections 6 and 7 use the internal SGP4
 | GP | General perturbations (element set) |
 | IAU | International Astronomical Union |
 | JD | Julian date |
+| MJD | Modified Julian date |
 | KVN | Keyword-value notation |
 | NORAD | North American Aerospace Defense Command (catalog number authority) |
 | OMM | Orbit mean-elements message |
@@ -845,7 +846,42 @@ The propagation process can be broken into a series of steps that will be covere
 11. Calculate position and velocity vectors in the TEME frame
 
 ### 7.1 Calculate the Time Since Epoch
-Implemented in `sgp4_prop_datetime` (`src/sgp4.rs`).
+Implemented in `sgp4_prop_datetime` (`src/sgp4.rs`) and `utc2jday` (`src/time.rs`), with the epoch stored in `Sgp4.jd0` and `Sgp4.jdfrac0`.
+
+Every propagation equation in Sections 7.2–7.11 is a function of $t$, the time since the GP element set epoch in minutes (Table 4). Note that $t$ can be a negative value to propagate to an earlier time. `sgp4_prop_delta` accepts $t$ directly, in which case this step is skipped. `sgp4_prop_datetime` instead accepts a UTC calendar date and time, so $t$ must first be calculated by converting both the requested time and the epoch to Julian dates.
+
+For a UTC date and time with year $y$, month $m$, day $d$, and time of day $\text{hr}$, $\text{min}$, $\text{sec}$, the year is shifted to start in March so that the leap day falls at the end of the year, as shown in Eq. (7.1.1). Equations (7.1.1)–(7.1.4) follow Montenbruck et al. ([15]).
+
+$$
+(y', m') = \begin{cases}
+(y - 1, m + 12) & m \le 2 \\
+(y, m) & m > 2
+\end{cases} \tag{7.1.1}
+$$
+
+Gregorian leap days through year $y'$ are accounted for by the auxiliary quantity $B$ in Eq. (7.1.2).
+
+$$
+B = \left\lfloor \frac{y'}{400} \right\rfloor - \left\lfloor \frac{y'}{100} \right\rfloor + \left\lfloor \frac{y'}{4} \right\rfloor \tag{7.1.2}
+$$
+
+The calendar day is stored as the Julian date of 0h UTC, $JD$, together with a day fraction $JD_{frac}$ measured from that midnight, given by Eqs. (7.1.3)–(7.1.4). Equation (7.1.3) is the modified Julian date plus $2400000.5$, so $JD$ is a half-integer. If $JD_{frac}$ falls outside $[0, 1)$, its whole part is carried into $JD$, and $JD$ remains a half-integer.
+
+$$
+JD = 365 y' - 679004 + B + \left\lfloor 30.6001 \left(m' + 1\right) \right\rfloor + d + 2400000.5 \tag{7.1.3}
+$$
+
+$$
+JD_{frac} = \frac{3600 \, \text{hr} + 60 \, \text{min} + \text{sec}}{86400} \tag{7.1.4}
+$$
+
+The same conversion is applied to the GP element set epoch during initialization, giving $JD_0$ and $JD_{frac,0}$. The time since epoch is then given by Eq. (7.1.5). The whole days and day fractions are differenced separately because a Julian date near $2.46 \times 10^6$ has a double-precision resolution of about 40 µs, which corresponds to roughly 0.3 m of in-track motion for a LEO satellite. $JD$ and $JD_0$ are exact half-integers, so differencing them separately keeps the full precision of the day fractions.
+
+$$
+t = 1440 \left[ \left(JD - JD_0\right) + \left(JD_{frac} - JD_{frac,0}\right) \right] \tag{7.1.5}
+$$
+
+The conversion is only valid for dates on or after October 10th, 1582, and it treats UTC as a uniform time scale. Leap seconds are not accounted for in the conversion, so intervals that span a leap second are off by one second. This is almost never of practical concern.
 
 ### 7.2 Account for Earth Zonal Gravity and Partial Atmospheric Drag Effects
 Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
@@ -992,3 +1028,4 @@ Thank you!
 - [12] [Space Force Alpha-5 Standard for TLEs](https://www.space-track.org/documentation#/tle-alpha5)
 - [13] [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
 - [14] [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al.](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
+- [15] [Satellite Orbits: Models, Methods and Applications by Montenbruck et al.](https://doi.org/10.1007/978-3-642-58351-3)
