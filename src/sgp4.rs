@@ -1121,13 +1121,16 @@ fn calc_lunar_solar_secular_rates(
 
     let m_x_dot = (-body.c * body.n / brouwer0.n) * (z1 + z3 - 14. - 6. * brouwer0.e.powi(2));
 
+    // Neglect the RAAN rate within 3 deg of 0 or 180 deg inclination to avoid dividing by sin(i) (Vallado sgp4fix for 180 deg incl)
+    let raan_rate_valid = brouwer0.i >= deg2rad(3.) && brouwer0.i <= PI - deg2rad(3.);
+
     let mut raan_x_dot = 0.;
-    if brouwer0.i >= deg2rad(3.) {
+    if raan_rate_valid {
         raan_x_dot = body.c * body.n / (2. * brouwer0.n * brouwer0.beta * sin_i0) * (z21 + z23);
     }
 
     let mut omega_x_dot = body.c * body.n * brouwer0.beta / brouwer0.n * (z31 + z33 - 6.);
-    if brouwer0.i >= deg2rad(3.) {
+    if raan_rate_valid {
         omega_x_dot -= raan_x_dot * cos_i0;
     }
 

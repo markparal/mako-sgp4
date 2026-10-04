@@ -235,6 +235,7 @@ Unless stated otherwise, the equations in Sections 6 and 7 use the internal SGP4
 ### 4.3 Conventions
 - $x \bmod 2\pi$ follows C `fmod` semantics (Rust `%` on `f64`), so the result keeps the sign of $x$. This matters for the mean element recovery in Section 7.6.
 - $\mathrm{atan2}(y, x)$ is the four-quadrant inverse tangent.
+- $x \mathrel{+}= y$ and $x \mathrel{-}= y$ add $y$ to or subtract $y$ from the current value of a time-varying element $x$ during propagation (Section 7).
 - Equations are numbered by section, e.g., Eq. (6.2.3) is the third equation in Section 6.2.
 
 ### 4.4 Acronyms
@@ -601,6 +602,8 @@ $$
 M_S = \left(M_{S0} + \dot{M}_{S0} \Delta t\right) \bmod 2\pi \tag{6.4.11}
 $$
 
+For satellites with $i_B < 3^\circ$ or $i_B > 177^\circ$, the third-body RAAN rates $\dot{\Omega}_X$ are set to zero to avoid the division by $\sin i_B$, and the corresponding $\cos i_B$ correction to the argument of perigee rates $\dot{\omega}_X$ is omitted. The retrograde bound follows Vallado et al. ([14]).
+
 ### 6.5 Initialize Earth Half-Day and Whole-Day Resonance Effects
 Implemented in `init_earth_gravity_resonance_halfday`, `init_earth_gravity_resonance_wholeday`, and `calc_theta_g` (`src/sgp4.rs`), stored in `Sgp4.half_day_resonance_params` and `Sgp4.whole_day_resonance_params`.
 
@@ -946,6 +949,41 @@ The eccentricity, inclination, and mean motion are carried forward unchanged fro
 ### 7.3 Account for Lunar and Solar Third-Body Secular Effects
 Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
 
+We will define the lunar and solar third-body secular variables with Table 13 below. These join the time-varying elements of Table 12.
+
+| Variable | Symbol | Units | Definition | Code |
+| --- | --- | --- | --- | --- |
+| Eccentricity | $e$ | - | Eccentricity at time $t$ | `e` |
+| Inclination | $i$ | radians | Inclination at time $t$ | `i` |
+
+<p align="center"><strong>Table 13.</strong> Lunar and solar third-body secular variables (Code entries are local variables in <code>sgp4_prop_delta</code>)</p>
+
+The lunar and solar third-body effects are only applied to deep-space satellites (Eq. (6.4.1)). For near-Earth satellites, this step is skipped and the eccentricity and inclination remain $e = e_B$ and $i = i_B$.
+
+For deep-space satellites, the secular rates from the Moon and Sun (Table 9) are summed and applied linearly in time, as given by Eqs. (7.3.1)–(7.3.5). The mean anomaly, argument of perigee, and RAAN build on the values from Section 7.2, while the eccentricity and inclination start from their Brouwer mean values at epoch.
+
+$$
+M \mathrel{+}= \left(\dot{M}_M + \dot{M}_S\right) t \tag{7.3.1}
+$$
+
+$$
+\omega \mathrel{+}= \left(\dot{\omega}_M + \dot{\omega}_S\right) t \tag{7.3.2}
+$$
+
+$$
+\Omega \mathrel{+}= \left(\dot{\Omega}_M + \dot{\Omega}_S\right) t \tag{7.3.3}
+$$
+
+$$
+e = e_B + \left(\dot{e}_M + \dot{e}_S\right) t \tag{7.3.4}
+$$
+
+$$
+i = i_B + \left(\dot{i}_M + \dot{i}_S\right) t \tag{7.3.5}
+$$
+
+The secular rates are evaluated once during initialization using the lunar and solar geometry at the GP element set epoch, so they are constant over the propagation. The variation of the lunar and solar positions with time enters through the long-period periodic terms in Section 7.7.
+
 ### 7.4 Account for Earth Half-Day and Whole-Day Resonance Effects
 Implemented in `sgp4_prop_delta`, `half_day_euler_maclaurin_step`, and `whole_day_euler_maclaurin_step` (`src/sgp4.rs`).
 
@@ -976,9 +1014,9 @@ mako-sgp4 is verified by two reference test suites in the `test/` directory, run
 | Suite | Source | Cases | Coverage |
 | --- | --- | --- | --- |
 | `test/vallado_cases.toml` | Vallado et al. [14] verification TLEs and ephemerides | 33 | Near-Earth and deep-space orbits, simplified drag, 12-hour and 24-hour resonance, Lyddane low inclination, decay, and an element set that must fail initialization |
-| `test/python-sgp4_cases.toml` | python-sgp4 (WGS-72, improved mode) | 15 | Near-circular, eccentric, sub-220 km perigee, $e_B < 10^{-4}$, Sun-synchronous, near-equatorial, negative $B^*$, high $B^*$, GEO, inclined GEO, Molniya, GPS MEO, GTO, low-inclination GTO over 10 years, and retrograde equatorial ($i_B = 180^\circ$) |
+| `test/python-sgp4_cases.toml` | python-sgp4 (WGS-72, improved mode) | 16 | Near-circular, eccentric, sub-220 km perigee, $e_B < 10^{-4}$, Sun-synchronous, near-equatorial, negative $B^*$, high $B^*$, GEO, inclined GEO, Molniya, GPS MEO, GTO, low-inclination GTO over 10 years, retrograde equatorial LEO ($i_B = 180^\circ$), and retrograde deep-space MEO ($i_B = 179^\circ$) |
 
-<p align="center"><strong>Table 13.</strong> Verification test suites</p>
+<p align="center"><strong>Table 14.</strong> Verification test suites</p>
 
 ## Appendix A: World Geodetic System (WGS) Models
 
