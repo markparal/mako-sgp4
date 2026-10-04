@@ -157,7 +157,7 @@ pub enum CoordinateFrame {
 /// - `j3`: -0.00000253881 - third zonal harmonic (pear-shaped component)
 /// - `j4`: -0.00000165597 - fourth zonal harmonic
 /// - `k4`: 0.00000062098875 - `-3/8 * j4` \[Earth radii^4\]
-/// - `ke`: 0.07436691613317 - square root of `mu` \[Earth radii^1.5 / min\]
+/// - `ke`: 0.07436691613317 - `60 * sqrt(mu / r_earth_eq^3)`, square root of `mu` \[Earth radii^1.5 / min\]
 ///
 /// # Examples
 /// ```rust
@@ -191,7 +191,7 @@ pub const WGS72: Wgs = Wgs {
 /// - `j3`: -0.00000253215306 - third zonal harmonic (pear-shaped component)
 /// - `j4`: -0.00000161098761 - fourth zonal harmonic
 /// - `k4`: 0.0000006041203538 - `-3/8 * j4` \[Earth radii^4\]
-/// - `ke`: 0.07436685316871 - square root of `mu` \[Earth radii^1.5 / min\]
+/// - `ke`: 0.07436685316871 - `60 * sqrt(mu / r_earth_eq^3)`, square root of `mu` \[Earth radii^1.5 / min\]
 ///
 /// # Examples
 /// ```rust

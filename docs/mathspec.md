@@ -40,8 +40,8 @@ For a complete historical rundown of the development of SGP4, it is recommended 
 | Classification | - | - | Security classification (`U` = Unclassified, `C` = Classified, `S` = Secret) |
 | International Designator | - | - | International designator in `Y-NP` form, where `Y` is launch year (4+ digits), `N` is launch number of that year (3+ digits), and `P` is piece of launch (1+ characters) |
 | Epoch Datetime | $t_{0}$ | UTC | UTC epoch datetime of the GP elements |
-| First Derivative of Mean Motion | $\dot{n}_B$ | revolutions/day^2 | Brouwer First time derivative of mean motion |
-| Second Derivative of Mean Motion | $\ddot{n}_B$ | revolutions/day^3 | Brouwer Second time derivative of mean motion |
+| First Derivative of Mean Motion | $\dot{n}_K$ | revolutions/day^2 | Kozai first time derivative of mean motion (unused in SGP4) |
+| Second Derivative of Mean Motion | $\ddot{n}_K$ | revolutions/day^3 | Kozai second time derivative of mean motion (unused in SGP4) |
 | B* | $B^{*}$ | 1/Earth radii | Atmospheric drag coefficient |
 | Ephemeris Type | - | - | Ephemeris type (always zero) |
 | Element Set Number | - | - | Element set number |
@@ -54,6 +54,8 @@ For a complete historical rundown of the development of SGP4, it is recommended 
 | Revolution Number at Epoch | - | revs | Revolution number at epoch |
 
 <p align="center"><strong>Table 1.</strong> Standard GP element set fields</p>
+
+The units in Table 1 are the units the fields are distributed in. In all equations that follow, the angles $i_B$, $\Omega_B$, $\omega_B$, and $M_B$ are converted to radians and the mean motion $n_K$ is converted to radians/min.
 
 The contents of GP element sets are described in Table 1 above. These elements characterize the orbit of a satellite and are what SGP4 uses to propagate the position and velocity over time. There are two primary formats for the distribution and ingestion of GP element sets: the two-line element (TLE) format and the orbit mean-elements message (OMM) format.
 
@@ -157,7 +159,7 @@ The standards for the OMM format and its associated fields can be found at [13].
 | CENTER_NAME | - | - | Always `EARTH` |
 | REF_FRAME | - | - | Always `TEME` |
 | TIME_SYSTEM | - | - | Always `UTC` |
-| MEAN_ELEMENT_THEORY | - | - | Always `SGP/SGP4` |
+| MEAN_ELEMENT_THEORY | - | - | `SGP/SGP4` for the public catalog |
 | EPOCH | Epoch Datetime | UTC | ISO-8601 UTC |
 | MEAN_MOTION | Mean Motion | revolutions/day | |
 | ECCENTRICITY | Eccentricity | - | |
@@ -226,7 +228,7 @@ a_1 = \left(\frac{k_e}{n_{K}}\right)^{2/3} \tag{1}
 $$
 
 $$
-\delta_1 = \frac{3}{2} \frac{k_2}{a_1^2} \frac{(3 \cos^2 i_B - 1)}{(1 - e_B^2)^{3/2}} \tag{2}
+\delta_1 = \frac{3}{2} \frac{k_2}{a_1^2} \frac{(3 \theta_B^2 - 1)}{(1 - e_B^2)^{3/2}} \tag{2}
 $$
 
 $$
@@ -234,7 +236,7 @@ a_2 = a_1 (1 - \frac{1}{3} \delta_1 - \delta_1^2 - \frac{134}{81} \delta_1^3) \t
 $$
 
 $$
-\delta_0 = \frac{3}{2} \frac{k_2}{a_2^2} \frac{(3 \cos^2 i_B -1)}{(1 - e_B^2)^{3/2}} \tag{4}
+\delta_0 = \frac{3}{2} \frac{k_2}{a_2^2} \frac{(3 \theta_B^2 - 1)}{(1 - e_B^2)^{3/2}} \tag{4}
 $$
 
 $$
@@ -261,17 +263,17 @@ We will define the atmospheric drag parameters with Table 5 below.
 | s | $s$ | Earth radii | Parameter of the power-law density function |
 | Zeta | $\zeta$ | 1 / Earth radii | $\zeta = 1 / (a_{B} - s)$ |
 | Eta | $\eta$ | - | $\eta = a_{B} e_{B} \zeta$ |
-| C1 | $C_{1}$ | - | Drag coefficient |
-| C3 | $C_{3}$ | - | Drag coefficient |
-| C4 | $C_{4}$ | - | Drag coefficient |
-| C5 | $C_{5}$ | - | Drag coefficient |
-| D2 | $D_{2}$ | - | Higher-order drag coefficient |
-| D3 | $D_{3}$ | - | Higher-order drag coefficient |
-| D4 | $D_{4}$ | - | Higher-order drag coefficient |
+| C1 | $C_{1}$ | 1 / min | Drag coefficient |
+| C3 | $C_{3}$ | Earth radii / min | Drag coefficient |
+| C4 | $C_{4}$ | Earth radii / min | Drag coefficient |
+| C5 | $C_{5}$ | Earth radii | Drag coefficient |
+| D2 | $D_{2}$ | 1 / min^2 | Higher-order drag coefficient |
+| D3 | $D_{3}$ | 1 / min^3 | Higher-order drag coefficient |
+| D4 | $D_{4}$ | 1 / min^4 | Higher-order drag coefficient |
 
 <p align="center"><strong>Table 5.</strong> Atmospheric drag parameters</p>
 
-Atmospheric drag modeling in SGP4 is based on the power density function given in eq 8, where $r$ is the radial distance between the satellite and the center of the Earth, $\rho$ is the atmospheric density, and $\rho_0$ is the reference atmospheric density at a distance $q_0$ from the center of the Earth.
+Atmospheric drag modeling in SGP4 is based on the power-law density function given in eq 8, where $r$ is the radial distance between the satellite and the center of the Earth, $\rho$ is the atmospheric density, and $\rho_0$ is the reference atmospheric density at a distance $q_0$ from the center of the Earth.
 
 $$
 \rho = \rho_0 (q_0 - s)^4 / (r - s)^4 \tag{8}
@@ -377,13 +379,13 @@ We will define the Earth zonal harmonics parameters with Table 6 below.
 
 | Parameter | Symbol | Units | Definition |
 | --- | --- | --- | --- |
-| Mean Anomaly Rate | $\dot{M}_{B}$ | radians/min | Secular rate of change of mean anomaly |
+| Mean Anomaly Rate | $\dot{M}_{B}$ | radians/min | Secular rate of change of mean anomaly due to the zonal harmonics, excluding the mean motion $n_B$ |
 | Argument of Perigee Rate | $\dot{\omega}_{B}$ | radians/min | Secular rate of change of argument of perigee |
 | Right Ascension of Ascending Node Rate | $\dot{\Omega}_{B}$ | radians/min | Secular rate of change of the right ascension of the ascending node (RAAN) |
 
 <p align="center"><strong>Table 6.</strong> Earth zonal harmonics parameters</p>
 
-The Earth zonal harmonics in SGP4 consider the impacts of $J_2$ and $J_4$. The resulting secular rates of the Brouwer mean elements are given in eqs 24-26. 
+The Earth zonal harmonics in SGP4 consider the impacts of $J_2$ and $J_4$. The resulting secular rates of the Brouwer mean elements are given in eqs 24-26. Note that $\dot{M}_B$ excludes the unperturbed motion $n_B$, so the total secular rate of the mean anomaly is $n_B + \dot{M}_B$.
 
 $$
 \begin{aligned}
@@ -462,7 +464,7 @@ We will define the lunar and solar third body parameters with Table 7 below.
 
 The lunar and solar third body effects are only considered if the spacecraft has a period greater than or equal to 225 minutes. If this is the case, this spacecraft is classified as a "deep space" satellite.
 
-The constants used for modeling the orbits and gravitational effects of the Sun and Moon are given in Tables B1 and B2. The time difference between the solar/lunar epoch and the GP element set epoch is defined as $\Delta t$. We calculate orbital parameters with eqs 27-36. The lunar equatorial inclination (eq 28) uses the Spacetrack/Hoots linearization of the ecliptic-to-equatorial transform rather than an exact inverse cosine.
+The constants used for modeling the orbits and gravitational effects of the Sun and Moon are given in Tables B1 and B2. The time difference between the solar/lunar epoch and the GP element set epoch is defined as $\Delta t = JD_0 - t_{SM}$ in days, where $JD_0$ is the Julian date of the GP element set epoch. We calculate orbital parameters with eqs 27-36.
 
 $$
 \Omega_{Me} = \left(\Omega_{Me0} + \dot{\Omega}_{Me0} \Delta t\right) \bmod 2\pi \tag{27}
@@ -504,7 +506,21 @@ $$
 M_S = \left(M_{S0} + \dot{M}_{S0} \Delta t\right) \bmod 2\pi \tag{36}
 $$
 
+#### Step 5. Initialize Earth half and whole day resonance effects
+
 ### Propagation
+Once a time is provided at which to propagate to, the state of the spacecraft can be calculated using the values found in the initialization process (stored in the `Sgp4` struct).
+
+The propagation process can be broken into a series of steps that will be covered individually. These steps are
+1. Account for Earth zonal gravity and partial atmospheric drag effects
+2. Account for Lunar and Solar third body effects
+3. Account for the whole and half day resonance effects of Earth's gravity
+4. Account for remaining atmospheric drag effects
+5. Account for long-period periodic effects of lunar and solar gravity
+6. Account for long-period periodic effects of Earth's gravity
+7. Account for short-period periodic effects of Earth's gravity (solve Kepler's equation)
+8. Calculate position and velocity vectors in the TEME frame
+
 
 ## Appendix A: World Geodetic System (WGS) Models
 
@@ -517,7 +533,7 @@ $$
 | `j3` | $J_{3}$ | - | -0.00000253881 | Third zonal harmonic (pear-shaped component) |
 | `j4` | $J_{4}$ | - | -0.00000165597 | Fourth zonal harmonic |
 | `k4` | $k_{4}$ | Earth radii^4 | 0.00000062098875 | $k_{4} = -\frac{3}{8} J_{4}$ |
-| `ke` | $k_{e}$ | Earth radii^1.5 / min | 0.07436691613317 | Square root of $\mu_{e}$ |
+| `ke` | $k_{e}$ | Earth radii^1.5 / min | 0.07436691613317 | $k_{e} = 60 \sqrt{\mu_{e} / R_{e}^{3}}$, the square root of $\mu_{e}$ in Earth radii^1.5 / min |
 
 <p align="center"><strong>Table A1.</strong> WGS-72 constants (SGP4 default)</p>
 
@@ -530,7 +546,7 @@ $$
 | `j3` | $J_{3}$ | - | -0.00000253215306 | Third zonal harmonic (pear-shaped component) |
 | `j4` | $J_{4}$ | - | -0.00000161098761 | Fourth zonal harmonic |
 | `k4` | $k_{4}$ | Earth radii^4 | 0.0000006041203538 | $k_{4} = -\frac{3}{8} J_{4}$ |
-| `ke` | $k_{e}$ | Earth radii^1.5 / min | 0.07436685316871 | Square root of $\mu_{e}$ |
+| `ke` | $k_{e}$ | Earth radii^1.5 / min | 0.07436685316871 | $k_{e} = 60 \sqrt{\mu_{e} / R_{e}^{3}}$, the square root of $\mu_{e}$ in Earth radii^1.5 / min |
 
 <p align="center"><strong>Table A2.</strong> WGS-84 constants</p>
 
