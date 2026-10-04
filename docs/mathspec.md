@@ -886,6 +886,63 @@ The conversion is only valid for dates on or after October 10th, 1582, and it tr
 ### 7.2 Account for Earth Zonal Gravity and Partial Atmospheric Drag Effects
 Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
 
+We will define the Earth zonal gravity and partial atmospheric drag variables with Table 12 below. Unlike the Brouwer mean elements at epoch (subscript $B$), the elements without a subscript are functions of $t$ and are updated in place by the remaining propagation steps.
+
+| Variable | Symbol | Units | Definition | Code |
+| --- | --- | --- | --- | --- |
+| Drag-Free Mean Anomaly | $M_{DF}$ | radians | Mean anomaly with the zonal secular rate applied | `m_df` |
+| Drag-Free Argument of Perigee | $\omega_{DF}$ | radians | Argument of perigee with the zonal secular rate applied | `omega_df` |
+| Drag-Free Right Ascension of Ascending Node | $\Omega_{DF}$ | radians | RAAN with the zonal secular rate applied | `raan_df` |
+| Argument of Perigee Drag Correction | $\delta\omega$ | radians | Drag correction exchanged between the argument of perigee and the mean anomaly | `delta_omega` |
+| Mean Anomaly Drag Correction | $\delta M$ | radians | Drag correction exchanged between the argument of perigee and the mean anomaly | `delta_m` |
+| Mean Anomaly | $M$ | radians | Mean anomaly at time $t$ | `m` |
+| Argument of Perigee | $\omega$ | radians | Argument of perigee at time $t$ | `omega` |
+| Right Ascension of Ascending Node | $\Omega$ | radians | RAAN at time $t$ | `raan` |
+
+<p align="center"><strong>Table 12.</strong> Earth zonal gravity and partial atmospheric drag variables (Code entries are local variables in <code>sgp4_prop_delta</code>)</p>
+
+The secular rates from the Earth zonal harmonics (Table 8) are first applied linearly in time to the Brouwer mean elements, as given by Eqs. (7.2.1)–(7.2.3). The mean anomaly includes the unperturbed mean motion $n_B$ as well, as noted in Section 6.3.
+
+$$
+M_{DF} = M_B + \left(n_B + \dot{M}_B\right) t \tag{7.2.1}
+$$
+
+$$
+\omega_{DF} = \omega_B + \dot{\omega}_B t \tag{7.2.2}
+$$
+
+$$
+\Omega_{DF} = \Omega_B + \dot{\Omega}_B t \tag{7.2.3}
+$$
+
+Atmospheric drag is only partially accounted for in this step. The drag effects on the argument of perigee, mean anomaly, and RAAN are applied here, while the drag effects on the semi-major axis, eccentricity, and mean longitude are applied in Section 7.5. The drag corrections to the argument of perigee and mean anomaly are given by Eqs. (7.2.4)–(7.2.5).
+
+$$
+\delta\omega = B^{*} C_3 \cos\left(\omega_B\right) t \tag{7.2.4}
+$$
+
+$$
+\delta M = -\frac{2}{3} \left(q_0 - s\right)^4 B^{*} \zeta^4 \frac{1}{e_B \eta} \left[\left(1 + \eta \cos M_{DF}\right)^3 - \left(1 + \eta \cos M_B\right)^3\right] \tag{7.2.5}
+$$
+
+Both corrections are set to zero for deep-space satellites (Eq. (6.4.1)), for satellites with a perigee height $h_p < 220$ km (Eq. (6.2.3)), and for $e_B \le 10^{-4}$. Below 220 km, SGP4 uses a simplified drag model that drops these terms. The small eccentricity condition follows Vallado et al. ([14]) and avoids the division by $e_B$ in Eq. (7.2.5), consistent with $C_3$ in Eq. (6.2.11).
+
+The mean anomaly, argument of perigee, and RAAN are then given by Eqs. (7.2.6)–(7.2.8). The corrections in Eqs. (7.2.6)–(7.2.7) are equal and opposite, so the drag exchanges angle between the argument of perigee and the mean anomaly without changing their sum. The RAAN correction in Eq. (7.2.8) is applied for all satellites and grows quadratically with time.
+
+$$
+M = M_{DF} + \delta\omega + \delta M \tag{7.2.6}
+$$
+
+$$
+\omega = \omega_{DF} - \delta\omega - \delta M \tag{7.2.7}
+$$
+
+$$
+\Omega = \Omega_{DF} - \frac{21}{2} \frac{n_B k_2 \theta_B}{a_B^2 \beta_B^2} C_1 t^2 \tag{7.2.8}
+$$
+
+The eccentricity, inclination, and mean motion are carried forward unchanged from $e_B$, $i_B$, and $n_B$ to the following steps.
+
 ### 7.3 Account for Lunar and Solar Third-Body Secular Effects
 Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
 
@@ -921,7 +978,7 @@ mako-sgp4 is verified by two reference test suites in the `test/` directory, run
 | `test/vallado_cases.toml` | Vallado et al. [14] verification TLEs and ephemerides | 33 | Near-Earth and deep-space orbits, simplified drag, 12-hour and 24-hour resonance, Lyddane low inclination, decay, and an element set that must fail initialization |
 | `test/python-sgp4_cases.toml` | python-sgp4 (WGS-72, improved mode) | 15 | Near-circular, eccentric, sub-220 km perigee, $e_B < 10^{-4}$, Sun-synchronous, near-equatorial, negative $B^*$, high $B^*$, GEO, inclined GEO, Molniya, GPS MEO, GTO, low-inclination GTO over 10 years, and retrograde equatorial ($i_B = 180^\circ$) |
 
-<p align="center"><strong>Table 12.</strong> Verification test suites</p>
+<p align="center"><strong>Table 13.</strong> Verification test suites</p>
 
 ## Appendix A: World Geodetic System (WGS) Models
 
