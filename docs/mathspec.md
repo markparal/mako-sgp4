@@ -356,33 +356,33 @@ We will define the Brouwer mean element set with Table 6 below.
 Many of these values are consistent with what is provided via the GP element set (with unit conversions). The main lift in this step is to convert the Kozai mean motion ($n_{K}$) into the Brouwer mean motion ($n_{B}$). This process is detailed in Eqs. (6.1.1)–(6.1.5).
 
 $$
-a_1 = \left(\frac{k_e}{n_{K}}\right)^{2/3} \tag{6.1.1}
+a_1 = \left(\frac{k_e}{n_{K}}\right)^{2/3} \qquad (6.1.1)
 $$
 
 $$
-\delta_1 = \frac{3}{2} \frac{k_2}{a_1^2} \frac{(3 \theta_B^2 - 1)}{(1 - e_B^2)^{3/2}} \tag{6.1.2}
+\delta_1 = \frac{3}{2} \frac{k_2}{a_1^2} \frac{(3 \theta_B^2 - 1)}{(1 - e_B^2)^{3/2}} \qquad (6.1.2)
 $$
 
 $$
-a_2 = a_1 (1 - \frac{1}{3} \delta_1 - \delta_1^2 - \frac{134}{81} \delta_1^3) \tag{6.1.3}
+a_2 = a_1 (1 - \frac{1}{3} \delta_1 - \delta_1^2 - \frac{134}{81} \delta_1^3) \qquad (6.1.3)
 $$
 
 $$
-\delta_0 = \frac{3}{2} \frac{k_2}{a_2^2} \frac{(3 \theta_B^2 - 1)}{(1 - e_B^2)^{3/2}} \tag{6.1.4}
+\delta_0 = \frac{3}{2} \frac{k_2}{a_2^2} \frac{(3 \theta_B^2 - 1)}{(1 - e_B^2)^{3/2}} \qquad (6.1.4)
 $$
 
 $$
-n_B = \frac{n_K}{1 + \delta_0} \tag{6.1.5}
+n_B = \frac{n_K}{1 + \delta_0} \qquad (6.1.5)
 $$
 
 With the Brouwer mean motion, extract the semi-major axis and orbital period as well with Eqs. (6.1.6)–(6.1.7).
 
 $$
-a_B = \left(\frac{k_e}{n_B}\right)^{2/3} \tag{6.1.6}
+a_B = \left(\frac{k_e}{n_B}\right)^{2/3} \qquad (6.1.6)
 $$
 
 $$
-T_B = 2 \pi \frac{\sqrt{(a_B R_e)^3 / \mu_e}}{60} \tag{6.1.7}
+T_B = 2 \pi \frac{\sqrt{(a_B R_e)^3 / \mu_e}}{60} \qquad (6.1.7)
 $$
 
 ### 6.2 Initialize Atmospheric Drag Parameters
@@ -410,19 +410,19 @@ We will define the atmospheric drag parameters with Table 7 below.
 Atmospheric drag modeling in SGP4 is based on the power-law density function given in Eq. (6.2.1), where $r$ is the radial distance between the satellite and the center of the Earth, $\rho$ is the atmospheric density, and $\rho_0$ is the reference atmospheric density at a distance $q_0$ from the center of the Earth.
 
 $$
-\rho = \rho_0 (q_0 - s)^4 / (r - s)^4 \tag{6.2.1}
+\rho = \rho_0 (q_0 - s)^4 / (r - s)^4 \qquad (6.2.1)
 $$
 
 Because $q_0$ is a reference, it is always the same constant given by Eq. (6.2.2).
 
 $$
-q_0 = (120 + R_e) / R_e \tag{6.2.2}
+q_0 = (120 + R_e) / R_e \qquad (6.2.2)
 $$
 
 The perigee height is given by Eq. (6.2.3).
 
 $$
-h_p = R_e \left(a_B (1 - e_B) - 1 \right) \tag{6.2.3}
+h_p = R_e \left(a_B (1 - e_B) - 1 \right) \qquad (6.2.3)
 $$
 
 The parameter $s$ is defined as a piecewise function of $h_p$ in Eq. (6.2.4).
@@ -432,25 +432,25 @@ s = \begin{cases}
 (78 + R_e) / R_e & h_p \ge 156 \\
 (h_p - 78 + R_e) / R_e & 98 \le h_p < 156 \\
 (20 + R_e) / R_e & h_p < 98
-\end{cases} \tag{6.2.4}
+\end{cases} \qquad (6.2.4)
 $$
 
 Additional constants are defined with Eqs. (6.2.5)–(6.2.8) ($A_{3,0}$ is in units of Earth Radii^3)
 
 $$
-A_{3,0} = -J_3 R_e^3 / R_e^3 \tag{6.2.5}
-$$
-
-$$ 
-\zeta = \frac{1}{a_B - s} \tag{6.2.6}
+A_{3,0} = -J_3 R_e^3 / R_e^3 \qquad (6.2.5)
 $$
 
 $$
-\eta = a_B e_B \zeta \tag{6.2.7}
+\zeta = \frac{1}{a_B - s} \qquad (6.2.6)
 $$
 
 $$
-\psi^2 = |1 - \eta^2| \tag{6.2.8}
+\eta = a_B e_B \zeta \qquad (6.2.7)
+$$
+
+$$
+\psi^2 = |1 - \eta^2| \qquad (6.2.8)
 $$
 
 Drag coefficients are defined with Eqs. (6.2.9)–(6.2.13). $C_3$ is set to zero for small eccentricity to avoid division by $e_B$.
@@ -460,19 +460,18 @@ $$
 C_2 &= (q_0 - s)^4 \zeta^4 n_B \left(\psi^2\right)^{-7/2} \\
 &\qquad \times \Biggl[ a_B \left(1 + \frac{3}{2} \eta^2 + 4 e_B \eta + e_B \eta^3\right) \\
 &\qquad + \frac{3}{2} \frac{k_2 \zeta}{\psi^2} \left(-\frac{1}{2} + \frac{3}{2} \theta_B^2\right) \left(8 + 24 \eta^2 + 3 \eta^4\right) \Biggr]
-\end{aligned}
-\tag{6.2.9}
+\end{aligned} \qquad (6.2.9)
 $$
 
 $$
-C_1 = B^{*} C_2 \tag{6.2.10}
+C_1 = B^{*} C_2 \qquad (6.2.10)
 $$
 
 $$
 C_3 = \begin{cases}
 \dfrac{(q_0 - s)^4 \zeta^5 A_{3,0} n_B \sin i_B}{k_2 e_B} & e_B > 10^{-4} \\
 0 & e_B \le 10^{-4}
-\end{cases} \tag{6.2.11}
+\end{cases} \qquad (6.2.11)
 $$
 
 $$
@@ -482,30 +481,28 @@ C_4 &= 2 n_B (q_0 - s)^4 \zeta^4 a_B \beta_B^2 \left(\psi^2\right)^{-7/2} \\
 &\qquad - \frac{2 k_2 \zeta}{a_B \psi^2} \Biggl( \\
 &\qquad\qquad 3\left(1 - 3\theta_B^2\right)\left(1 + \frac{3}{2}\eta^2 - 2 e_B \eta - \frac{1}{2} e_B \eta^3\right) \\
 &\qquad\qquad + \frac{3}{4}\left(1 - \theta_B^2\right)\left(2\eta^2 - e_B \eta - e_B \eta^3\right) \cos\left(2\omega_B\right) \Biggr) \Biggr]
-\end{aligned}
-\tag{6.2.12}
+\end{aligned} \qquad (6.2.12)
 $$
 
 $$
 \begin{aligned}
 C_5 &= 2 (q_0 - s)^4 \zeta^4 a_B \beta_B^2 \left(\psi^2\right)^{-7/2} \\
 &\qquad \times \left(1 + \frac{11}{4} \eta\left(\eta + e_B\right) + e_B \eta^3\right)
-\end{aligned}
-\tag{6.2.13}
+\end{aligned} \qquad (6.2.13)
 $$
 
 Higher-order drag coefficients are defined with Eqs. (6.2.14)–(6.2.16).
 
 $$
-D_2 = 4 a_B \zeta C_1^2 \tag{6.2.14}
+D_2 = 4 a_B \zeta C_1^2 \qquad (6.2.14)
 $$
 
 $$
-D_3 = \frac{4}{3} a_B \zeta^2 \left(17 a_B + s\right) C_1^3 \tag{6.2.15}
+D_3 = \frac{4}{3} a_B \zeta^2 \left(17 a_B + s\right) C_1^3 \qquad (6.2.15)
 $$
 
 $$
-D_4 = \frac{2}{3} a_B^2 \zeta^3 \left(221 a_B + 31 s\right) C_1^4 \tag{6.2.16}
+D_4 = \frac{2}{3} a_B^2 \zeta^3 \left(221 a_B + 31 s\right) C_1^4 \qquad (6.2.16)
 $$
 
 ### 6.3 Initialize Earth Zonal Harmonics Parameters
@@ -529,8 +526,7 @@ $$
 \frac{3 k_2 \left(-1 + 3 \theta_B^{2}\right)}{2 a_B^{2} \beta_B^{3}} \\
 &\qquad + \frac{3 k_2^{2} \left(13 - 78 \theta_B^{2} + 137 \theta_B^{4}\right)}{16 a_B^{4} \beta_B^{7}}
 \Biggr]
-\end{aligned}
-\tag{6.3.1}
+\end{aligned} \qquad (6.3.1)
 $$
 
 $$
@@ -540,8 +536,7 @@ $$
 &\qquad + \frac{3 k_2^{2} \left(7 - 114 \theta_B^{2} + 395 \theta_B^{4}\right)}{16 a_B^{4} \beta_B^{8}} \\
 &\qquad + \frac{5 k_4 \left(3 - 36 \theta_B^{2} + 49 \theta_B^{4}\right)}{4 a_B^{4} \beta_B^{8}}
 \Biggr]
-\end{aligned}
-\tag{6.3.2}
+\end{aligned} \qquad (6.3.2)
 $$
 
 $$
@@ -551,8 +546,7 @@ $$
 &\qquad + \frac{3 k_2^{2} \left(4 \theta_B - 19 \theta_B^{3}\right)}{2 a_B^{4} \beta_B^{8}} \\
 &\qquad + \frac{5 k_4 \theta_B \left(3 - 7 \theta_B^{2}\right)}{2 a_B^{4} \beta_B^{8}}
 \Biggr]
-\end{aligned}
-\tag{6.3.3}
+\end{aligned} \qquad (6.3.3)
 $$
 
 ### 6.4 Initialize Lunar and Solar Third-Body Parameters
@@ -603,49 +597,49 @@ We will define the lunar and solar third-body parameters with Table 9 below.
 The lunar and solar third-body effects are only considered if the spacecraft has a period greater than or equal to 225 minutes, as given by Eq. (6.4.1). If this is the case, this spacecraft is classified as a "deep-space" satellite.
 
 $$
-T_B \ge 225 \text{ min} \quad \text{(deep space, } n_B \le 2\pi / 225 \approx 0.0279253 \text{ rad/min)} \tag{6.4.1}
+T_B \ge 225 \text{ min} \quad \text{(deep space, } n_B \le 2\pi / 225 \approx 0.0279253 \text{ rad/min)} \qquad (6.4.1)
 $$
 
 The constants used for modeling the orbits and gravitational effects of the Sun and Moon are given in Tables B1 and B2. The time difference between the solar/lunar epoch and the GP element set epoch is defined as $\Delta t = JD_0 - t_{SM}$ in days, where $JD_0$ is the Julian date of the GP element set epoch. We calculate orbital parameters with Eqs. (6.4.2)–(6.4.11).
 
 $$
-\Omega_{Me} = \left(\Omega_{Me0} + \dot{\Omega}_{Me0} \Delta t\right) \bmod 2\pi \tag{6.4.2}
+\Omega_{Me} = \left(\Omega_{Me0} + \dot{\Omega}_{Me0} \Delta t\right) \bmod 2\pi \qquad (6.4.2)
 $$
 
 $$
-\cos i_M = 0.91375164 - 0.03568096 \cos \Omega_{Me} \tag{6.4.3}
+\cos i_M = 0.91375164 - 0.03568096 \cos \Omega_{Me} \qquad (6.4.3)
 $$
 
 $$
-\gamma_M = u_{Me0} + \dot{u}_{Me0} \Delta t \tag{6.4.4}
+\gamma_M = u_{Me0} + \dot{u}_{Me0} \Delta t \qquad (6.4.4)
 $$
 
 $$
-\sin \Omega_M = 0.089683511 \frac{\sin \Omega_{Me}}{\sin i_M} \tag{6.4.5}
+\sin \Omega_M = 0.089683511 \frac{\sin \Omega_{Me}}{\sin i_M} \qquad (6.4.5)
 $$
 
 $$
-\Omega_M = \mathrm{atan2}\left(\sin \Omega_M, \cos \Omega_M\right) \tag{6.4.6}
+\Omega_M = \mathrm{atan2}\left(\sin \Omega_M, \cos \Omega_M\right) \qquad (6.4.6)
 $$
 
 $$
-z_x = \sin i_S \frac{\sin \Omega_{Me}}{\sin i_M} \tag{6.4.7}
+z_x = \sin i_S \frac{\sin \Omega_{Me}}{\sin i_M} \qquad (6.4.7)
 $$
 
 $$
-z_y = \cos \Omega_M \cos \Omega_{Me} + \cos i_S \sin \Omega_M \sin \Omega_{Me} \tag{6.4.8}
+z_y = \cos \Omega_M \cos \Omega_{Me} + \cos i_S \sin \Omega_M \sin \Omega_{Me} \qquad (6.4.8)
 $$
 
 $$
-\omega_M = \gamma_M + \mathrm{atan2}\left(z_x, z_y\right) - \Omega_{Me} \tag{6.4.9}
+\omega_M = \gamma_M + \mathrm{atan2}\left(z_x, z_y\right) - \Omega_{Me} \qquad (6.4.9)
 $$
 
 $$
-M_M = \left(M_{M0} + \dot{M}_{M0} \Delta t - \gamma_M\right) \bmod 2\pi \tag{6.4.10}
+M_M = \left(M_{M0} + \dot{M}_{M0} \Delta t - \gamma_M\right) \bmod 2\pi \qquad (6.4.10)
 $$
 
 $$
-M_S = \left(M_{S0} + \dot{M}_{S0} \Delta t\right) \bmod 2\pi \tag{6.4.11}
+M_S = \left(M_{S0} + \dot{M}_{S0} \Delta t\right) \bmod 2\pi \qquad (6.4.11)
 $$
 
 For satellites with $i_B < 3^\circ$ or $i_B > 177^\circ$, the third-body RAAN rates $\dot{\Omega}_X$ are set to zero to avoid the division by $\sin i_B$, and the corresponding $\cos i_B$ correction to the argument of perigee rates $\dot{\omega}_X$ is omitted. The retrograde bound follows Vallado et al. ([14]).
@@ -679,21 +673,21 @@ We will define the Earth resonance parameters with Table 10 below.
 Satellites whose orbital periods are commensurate with the Earth's rotation experience resonant perturbations from the Earth's tesseral harmonics that do not average out over an orbit. SGP4 models two cases: whole-day resonance (geosynchronous orbits with periods near 24 hours) and half-day resonance (highly eccentric 12-hour orbits, such as Molniya orbits). mako-sgp4 uses the selection criteria of Vallado et al. ([14]) given in Eqs. (6.5.1)–(6.5.2). Both ranges correspond to periods above 225 minutes, so resonance effects only apply to deep-space satellites.
 
 $$
-0.0034906585 < n_B < 0.0052359877 \quad \text{(whole-day, } 1200 < T_B < 1800 \text{ min)} \tag{6.5.1}
+0.0034906585 < n_B < 0.0052359877 \quad \text{(whole-day, } 1200 < T_B < 1800 \text{ min)} \qquad (6.5.1)
 $$
 
 $$
-8.26 \times 10^{-3} \le n_B \le 9.24 \times 10^{-3} \text{ and } e_B \ge 0.5 \quad \text{(half-day, } 680 \lesssim T_B \lesssim 760.7 \text{ min)} \tag{6.5.2}
+8.26 \times 10^{-3} \le n_B \le 9.24 \times 10^{-3} \text{ and } e_B \ge 0.5 \quad \text{(half-day, } 680 \lesssim T_B \lesssim 760.7 \text{ min)} \qquad (6.5.2)
 $$
 
 Both resonances are referenced to the Greenwich mean sidereal time at epoch. This is computed with the IAU-82 model in Eqs. (6.5.3)–(6.5.4), where $T_{UT1}$ is the number of Julian centuries since J2000.0. mako-sgp4 uses the UTC epoch in place of UT1.
 
 $$
-T_{UT1} = \frac{JD_0 - 2451545.0}{36525} \tag{6.5.3}
+T_{UT1} = \frac{JD_0 - 2451545.0}{36525} \qquad (6.5.3)
 $$
 
 $$
-\theta_g = \frac{\pi}{180} \cdot \frac{67310.54841 + \left(876600 \cdot 3600 + 8640184.812866\right) T_{UT1} + 0.093104 T_{UT1}^2 - 6.2 \times 10^{-6} T_{UT1}^3}{240} \bmod 2\pi \tag{6.5.4}
+\theta_g = \frac{\pi}{180} \cdot \frac{67310.54841 + \left(876600 \cdot 3600 + 8640184.812866\right) T_{UT1} + 0.093104 T_{UT1}^2 - 6.2 \times 10^{-6} T_{UT1}^3}{240} \bmod 2\pi \qquad (6.5.4)
 $$
 
 The Earth rotation rate $\dot{\theta}_E$ and the tesseral resonance constants $Q_{lm}$ and $\lambda_{lm}$ are given in Table C1.
@@ -701,53 +695,53 @@ The Earth rotation rate $\dot{\theta}_E$ and the tesseral resonance constants $Q
 For half-day resonance, the functions of inclination are given in Eqs. (6.5.5)–(6.5.14).
 
 $$
-F_{220} = \frac{3}{4} \left(1 + \theta_B\right)^2 \tag{6.5.5}
+F_{220} = \frac{3}{4} \left(1 + \theta_B\right)^2 \qquad (6.5.5)
 $$
 
 $$
-F_{221} = \frac{3}{2} \sin^2 i_B \tag{6.5.6}
+F_{221} = \frac{3}{2} \sin^2 i_B \qquad (6.5.6)
 $$
 
 $$
-F_{321} = \frac{15}{8} \sin i_B \left(1 - 2\theta_B - 3\theta_B^2\right) \tag{6.5.7}
+F_{321} = \frac{15}{8} \sin i_B \left(1 - 2\theta_B - 3\theta_B^2\right) \qquad (6.5.7)
 $$
 
 $$
-F_{322} = -\frac{15}{8} \sin i_B \left(1 + 2\theta_B - 3\theta_B^2\right) \tag{6.5.8}
+F_{322} = -\frac{15}{8} \sin i_B \left(1 + 2\theta_B - 3\theta_B^2\right) \qquad (6.5.8)
 $$
 
 $$
-F_{441} = \frac{105}{4} \sin^2 i_B \left(1 + \theta_B\right)^2 \tag{6.5.9}
+F_{441} = \frac{105}{4} \sin^2 i_B \left(1 + \theta_B\right)^2 \qquad (6.5.9)
 $$
 
 $$
-F_{442} = \frac{315}{8} \sin^4 i_B \tag{6.5.10}
+F_{442} = \frac{315}{8} \sin^4 i_B \qquad (6.5.10)
 $$
 
 $$
-F_{522} = \frac{315}{32} \sin i_B \left[\sin^2 i_B \left(1 - 2\theta_B - 5\theta_B^2\right) - \frac{2}{3} + \frac{4}{3}\theta_B + 2\theta_B^2\right] \tag{6.5.11}
+F_{522} = \frac{315}{32} \sin i_B \left[\sin^2 i_B \left(1 - 2\theta_B - 5\theta_B^2\right) - \frac{2}{3} + \frac{4}{3}\theta_B + 2\theta_B^2\right] \qquad (6.5.11)
 $$
 
 $$
-F_{523} = \frac{105}{16} \sin i_B \left[1 + 2\theta_B - 3\theta_B^2 - \frac{3}{2} \sin^2 i_B \left(1 + 2\theta_B - 5\theta_B^2\right)\right] \tag{6.5.12}
+F_{523} = \frac{105}{16} \sin i_B \left[1 + 2\theta_B - 3\theta_B^2 - \frac{3}{2} \sin^2 i_B \left(1 + 2\theta_B - 5\theta_B^2\right)\right] \qquad (6.5.12)
 $$
 
 $$
-F_{542} = \frac{945}{32} \sin i_B \left[2 - 8\theta_B + \theta_B^2 \left(-12 + 8\theta_B + 10\theta_B^2\right)\right] \tag{6.5.13}
+F_{542} = \frac{945}{32} \sin i_B \left[2 - 8\theta_B + \theta_B^2 \left(-12 + 8\theta_B + 10\theta_B^2\right)\right] \qquad (6.5.13)
 $$
 
 $$
-F_{543} = \frac{945}{32} \sin i_B \left[\theta_B^2 \left(12 + 8\theta_B - 10\theta_B^2\right) - 2 - 8\theta_B\right] \tag{6.5.14}
+F_{543} = \frac{945}{32} \sin i_B \left[\theta_B^2 \left(12 + 8\theta_B - 10\theta_B^2\right) - 2 - 8\theta_B\right] \qquad (6.5.14)
 $$
 
 The functions of eccentricity are given below. $G_{201}$ is given as an example by Eq. (6.5.15), and the remaining functions are cubic polynomials in $e_B$ of the form of Eq. (6.5.16), with the coefficients in Table 11.
 
 $$
-G_{201} = -0.306 - 0.44 \left(e_B - 0.64\right) \tag{6.5.15}
+G_{201} = -0.306 - 0.44 \left(e_B - 0.64\right) \qquad (6.5.15)
 $$
 
 $$
-G_{lpq} = g_0 + g_1 e_B + g_2 e_B^2 + g_3 e_B^3 \tag{6.5.16}
+G_{lpq} = g_0 + g_1 e_B + g_2 e_B^2 + g_3 e_B^3 \qquad (6.5.16)
 $$
 
 | Function | Eccentricity Range | $g_0$ | $g_1$ | $g_2$ | $g_3$ |
@@ -777,103 +771,103 @@ $$
 The half-day resonance coefficients are then given by Eqs. (6.5.17)–(6.5.26). Note that several of the $D_{44pq}$ and $D_{54pq}$ expressions printed in Hoots et al. ([9]) contain typos.
 
 $$
-D_{2201} = \frac{3 n_B^2}{a_B^2} Q_{22} F_{220} G_{201} \tag{6.5.17}
+D_{2201} = \frac{3 n_B^2}{a_B^2} Q_{22} F_{220} G_{201} \qquad (6.5.17)
 $$
 
 $$
-D_{2211} = \frac{3 n_B^2}{a_B^2} Q_{22} F_{221} G_{211} \tag{6.5.18}
+D_{2211} = \frac{3 n_B^2}{a_B^2} Q_{22} F_{221} G_{211} \qquad (6.5.18)
 $$
 
 $$
-D_{3210} = \frac{3 n_B^2}{a_B^3} Q_{32} F_{321} G_{310} \tag{6.5.19}
+D_{3210} = \frac{3 n_B^2}{a_B^3} Q_{32} F_{321} G_{310} \qquad (6.5.19)
 $$
 
 $$
-D_{3222} = \frac{3 n_B^2}{a_B^3} Q_{32} F_{322} G_{322} \tag{6.5.20}
+D_{3222} = \frac{3 n_B^2}{a_B^3} Q_{32} F_{322} G_{322} \qquad (6.5.20)
 $$
 
 $$
-D_{4410} = \frac{6 n_B^2}{a_B^4} Q_{44} F_{441} G_{410} \tag{6.5.21}
+D_{4410} = \frac{6 n_B^2}{a_B^4} Q_{44} F_{441} G_{410} \qquad (6.5.21)
 $$
 
 $$
-D_{4422} = \frac{6 n_B^2}{a_B^4} Q_{44} F_{442} G_{422} \tag{6.5.22}
+D_{4422} = \frac{6 n_B^2}{a_B^4} Q_{44} F_{442} G_{422} \qquad (6.5.22)
 $$
 
 $$
-D_{5220} = \frac{3 n_B^2}{a_B^5} Q_{52} F_{522} G_{520} \tag{6.5.23}
+D_{5220} = \frac{3 n_B^2}{a_B^5} Q_{52} F_{522} G_{520} \qquad (6.5.23)
 $$
 
 $$
-D_{5232} = \frac{3 n_B^2}{a_B^5} Q_{52} F_{523} G_{532} \tag{6.5.24}
+D_{5232} = \frac{3 n_B^2}{a_B^5} Q_{52} F_{523} G_{532} \qquad (6.5.24)
 $$
 
 $$
-D_{5421} = \frac{6 n_B^2}{a_B^5} Q_{54} F_{542} G_{521} \tag{6.5.25}
+D_{5421} = \frac{6 n_B^2}{a_B^5} Q_{54} F_{542} G_{521} \qquad (6.5.25)
 $$
 
 $$
-D_{5433} = \frac{6 n_B^2}{a_B^5} Q_{54} F_{543} G_{533} \tag{6.5.26}
+D_{5433} = \frac{6 n_B^2}{a_B^5} Q_{54} F_{543} G_{533} \qquad (6.5.26)
 $$
 
 The half-day auxiliary longitude and its secular rate are given by Eqs. (6.5.27)–(6.5.28). The rate combines the zonal (Table 8) and third-body (Table 9) secular rates.
 
 $$
-\lambda_0 = \left(M_B + 2\Omega_B - 2\theta_g\right) \bmod 2\pi \tag{6.5.27}
+\lambda_0 = \left(M_B + 2\Omega_B - 2\theta_g\right) \bmod 2\pi \qquad (6.5.27)
 $$
 
 $$
-\dot{\lambda}_0 = \dot{M}_B + \dot{M}_M + \dot{M}_S + 2\left(\dot{\Omega}_B + \dot{\Omega}_M + \dot{\Omega}_S\right) - 2\dot{\theta}_E \tag{6.5.28}
+\dot{\lambda}_0 = \dot{M}_B + \dot{M}_M + \dot{M}_S + 2\left(\dot{\Omega}_B + \dot{\Omega}_M + \dot{\Omega}_S\right) - 2\dot{\theta}_E \qquad (6.5.28)
 $$
 
 For whole-day resonance, the functions of inclination and eccentricity are given in Eqs. (6.5.29)–(6.5.34). $F_{220}$ is the same function as Eq. (6.5.5) in the half-day resonance, and is repeated here for completeness. However, note that the whole-day $G_{310}$ in Eq. (6.5.33) is a different function from the half-day $G_{310}$ in Table 11, despite sharing the same name. 
 
 $$
-F_{220} = \frac{3}{4} \left(1 + \theta_B\right)^2 \tag{6.5.29}
+F_{220} = \frac{3}{4} \left(1 + \theta_B\right)^2 \qquad (6.5.29)
 $$
 
 $$
-F_{311} = \frac{15}{16} \sin^2 i_B \left(1 + 3\theta_B\right) - \frac{3}{4} \left(1 + \theta_B\right) \tag{6.5.30}
+F_{311} = \frac{15}{16} \sin^2 i_B \left(1 + 3\theta_B\right) - \frac{3}{4} \left(1 + \theta_B\right) \qquad (6.5.30)
 $$
 
 $$
-F_{330} = \frac{15}{8} \left(1 + \theta_B\right)^3 \tag{6.5.31}
+F_{330} = \frac{15}{8} \left(1 + \theta_B\right)^3 \qquad (6.5.31)
 $$
 
 $$
-G_{200} = 1 - \frac{5}{2} e_B^2 + \frac{13}{16} e_B^4 \tag{6.5.32}
+G_{200} = 1 - \frac{5}{2} e_B^2 + \frac{13}{16} e_B^4 \qquad (6.5.32)
 $$
 
 $$
-G_{310} = 1 + 2 e_B^2 \tag{6.5.33}
+G_{310} = 1 + 2 e_B^2 \qquad (6.5.33)
 $$
 
 $$
-G_{300} = 1 - 6 e_B^2 + \frac{423}{64} e_B^4 \tag{6.5.34}
+G_{300} = 1 - 6 e_B^2 + \frac{423}{64} e_B^4 \qquad (6.5.34)
 $$
 
 The whole-day resonance coefficients are given by Eqs. (6.5.35)–(6.5.37).
 
 $$
-\delta_1 = \frac{3 n_B^2}{a_B^3} F_{311} G_{310} Q_{31} \tag{6.5.35}
+\delta_1 = \frac{3 n_B^2}{a_B^3} F_{311} G_{310} Q_{31} \qquad (6.5.35)
 $$
 
 $$
-\delta_2 = \frac{6 n_B^2}{a_B^2} F_{220} G_{200} Q_{22} \tag{6.5.36}
+\delta_2 = \frac{6 n_B^2}{a_B^2} F_{220} G_{200} Q_{22} \qquad (6.5.36)
 $$
 
 $$
-\delta_3 = \frac{9 n_B^2}{a_B^3} F_{330} G_{300} Q_{33} \tag{6.5.37}
+\delta_3 = \frac{9 n_B^2}{a_B^3} F_{330} G_{300} Q_{33} \qquad (6.5.37)
 $$
 
 Finally, the whole-day auxiliary longitude and its secular rate are given by Eqs. (6.5.38)–(6.5.39).
 
 $$
-\lambda_0 = M_B + \Omega_B + \omega_B - \theta_g \tag{6.5.38}
+\lambda_0 = M_B + \Omega_B + \omega_B - \theta_g \qquad (6.5.38)
 $$
 
 $$
-\dot{\lambda}_0 = \dot{M}_B + \dot{M}_M + \dot{M}_S + \dot{\Omega}_B + \dot{\Omega}_M + \dot{\Omega}_S + \dot{\omega}_B + \dot{\omega}_M + \dot{\omega}_S - \dot{\theta}_E \tag{6.5.39}
+\dot{\lambda}_0 = \dot{M}_B + \dot{M}_M + \dot{M}_S + \dot{\Omega}_B + \dot{\Omega}_M + \dot{\Omega}_S + \dot{\omega}_B + \dot{\omega}_M + \dot{\omega}_S - \dot{\theta}_E \qquad (6.5.39)
 $$
 
 During propagation, $\lambda_0$ and $n_B$ are numerically integrated forward in time using these coefficients (see Section 7.4).
@@ -905,29 +899,29 @@ $$
 (y', m') = \begin{cases}
 (y - 1, m + 12) & m \le 2 \\
 (y, m) & m > 2
-\end{cases} \tag{7.1.1}
+\end{cases} \qquad (7.1.1)
 $$
 
 Gregorian leap days through year $y'$ are accounted for by the auxiliary quantity $B$ in Eq. (7.1.2).
 
 $$
-B = \left\lfloor \frac{y'}{400} \right\rfloor - \left\lfloor \frac{y'}{100} \right\rfloor + \left\lfloor \frac{y'}{4} \right\rfloor \tag{7.1.2}
+B = \left\lfloor \frac{y'}{400} \right\rfloor - \left\lfloor \frac{y'}{100} \right\rfloor + \left\lfloor \frac{y'}{4} \right\rfloor \qquad (7.1.2)
 $$
 
 The calendar day is stored as the Julian date of 0h UTC, $JD$, together with a day fraction $JD_{frac}$ measured from that midnight, given by Eqs. (7.1.3)–(7.1.4). Equation (7.1.3) is the modified Julian date plus $2400000.5$, so $JD$ is a half-integer. If $JD_{frac}$ falls outside $[0, 1)$, its whole part is carried into $JD$, and $JD$ remains a half-integer.
 
 $$
-JD = 365 y' - 679004 + B + \left\lfloor 30.6001 \left(m' + 1\right) \right\rfloor + d + 2400000.5 \tag{7.1.3}
+JD = 365 y' - 679004 + B + \left\lfloor 30.6001 \left(m' + 1\right) \right\rfloor + d + 2400000.5 \qquad (7.1.3)
 $$
 
 $$
-JD_{frac} = \frac{3600 \, \text{hr} + 60 \, \text{min} + \text{sec}}{86400} \tag{7.1.4}
+JD_{frac} = \frac{3600 \, \text{hr} + 60 \, \text{min} + \text{sec}}{86400} \qquad (7.1.4)
 $$
 
 The same conversion is applied to the GP element set epoch during initialization, giving $JD_0$ and $JD_{frac,0}$. The time since epoch is then given by Eq. (7.1.5). The whole days and day fractions are differenced separately because a Julian date near $2.46 \times 10^6$ has a double-precision resolution of about 40 µs, which corresponds to roughly 0.3 m of in-track motion for a LEO satellite. $JD$ and $JD_0$ are exact half-integers, so differencing them separately keeps the full precision of the day fractions.
 
 $$
-t = 1440 \left[ \left(JD - JD_0\right) + \left(JD_{frac} - JD_{frac,0}\right) \right] \tag{7.1.5}
+t = 1440 \left[ \left(JD - JD_0\right) + \left(JD_{frac} - JD_{frac,0}\right) \right] \qquad (7.1.5)
 $$
 
 The conversion is only valid for dates on or after October 10th, 1582, and it treats UTC as a uniform time scale. Leap seconds are not accounted for in the conversion, so intervals that span a leap second are off by one second. This is almost never of practical concern.
@@ -953,25 +947,25 @@ We will define the Earth zonal gravity and partial atmospheric drag variables wi
 The secular rates from the Earth zonal harmonics (Table 8) are first applied linearly in time to the Brouwer mean elements, as given by Eqs. (7.2.1)–(7.2.3). The mean anomaly includes the unperturbed mean motion $n_B$ as well, as noted in Section 6.3.
 
 $$
-M_{DF} = M_B + \left(n_B + \dot{M}_B\right) t \tag{7.2.1}
+M_{DF} = M_B + \left(n_B + \dot{M}_B\right) t \qquad (7.2.1)
 $$
 
 $$
-\omega_{DF} = \omega_B + \dot{\omega}_B t \tag{7.2.2}
+\omega_{DF} = \omega_B + \dot{\omega}_B t \qquad (7.2.2)
 $$
 
 $$
-\Omega_{DF} = \Omega_B + \dot{\Omega}_B t \tag{7.2.3}
+\Omega_{DF} = \Omega_B + \dot{\Omega}_B t \qquad (7.2.3)
 $$
 
 Atmospheric drag is only partially accounted for in this step. The drag effects on the argument of perigee, mean anomaly, and RAAN are applied here, while the drag effects on the semi-major axis, eccentricity, and mean longitude are applied in Section 7.5. The drag corrections to the argument of perigee and mean anomaly are given by Eqs. (7.2.4)–(7.2.5).
 
 $$
-\delta\omega = B^{*} C_3 \cos\left(\omega_B\right) t \tag{7.2.4}
+\delta\omega = B^{*} C_3 \cos\left(\omega_B\right) t \qquad (7.2.4)
 $$
 
 $$
-\delta M = -\frac{2}{3} \left(q_0 - s\right)^4 B^{*} \zeta^4 \frac{1}{e_B \eta} \left[\left(1 + \eta \cos M_{DF}\right)^3 - \left(1 + \eta \cos M_B\right)^3\right] \tag{7.2.5}
+\delta M = -\frac{2}{3} \left(q_0 - s\right)^4 B^{*} \zeta^4 \frac{1}{e_B \eta} \left[\left(1 + \eta \cos M_{DF}\right)^3 - \left(1 + \eta \cos M_B\right)^3\right] \qquad (7.2.5)
 $$
 
 Both corrections are set to zero for deep-space satellites (Eq. (6.4.1)), for satellites with a perigee height $h_p < 220$ km (Eq. (6.2.3)), and for $e_B \le 10^{-4}$. Below 220 km, SGP4 uses a simplified drag model that drops these terms. The small eccentricity condition follows Vallado et al. ([14]) and avoids the division by $e_B$ in Eq. (7.2.5), consistent with $C_3$ in Eq. (6.2.11).
@@ -979,15 +973,15 @@ Both corrections are set to zero for deep-space satellites (Eq. (6.4.1)), for sa
 The mean anomaly, argument of perigee, and RAAN are then given by Eqs. (7.2.6)–(7.2.8). The corrections in Eqs. (7.2.6)–(7.2.7) are equal and opposite, so the drag exchanges angle between the argument of perigee and the mean anomaly without changing their sum. The RAAN correction in Eq. (7.2.8) is applied for all satellites and grows quadratically with time.
 
 $$
-M = M_{DF} + \delta\omega + \delta M \tag{7.2.6}
+M = M_{DF} + \delta\omega + \delta M \qquad (7.2.6)
 $$
 
 $$
-\omega = \omega_{DF} - \delta\omega - \delta M \tag{7.2.7}
+\omega = \omega_{DF} - \delta\omega - \delta M \qquad (7.2.7)
 $$
 
 $$
-\Omega = \Omega_{DF} - \frac{21}{2} \frac{n_B k_2 \theta_B}{a_B^2 \beta_B^2} C_1 t^2 \tag{7.2.8}
+\Omega = \Omega_{DF} - \frac{21}{2} \frac{n_B k_2 \theta_B}{a_B^2 \beta_B^2} C_1 t^2 \qquad (7.2.8)
 $$
 
 The eccentricity, inclination, and mean motion are carried forward unchanged from $e_B$, $i_B$, and $n_B$ to the following steps.
@@ -1009,23 +1003,23 @@ The lunar and solar third-body effects are only applied to deep-space satellites
 For deep-space satellites, the secular rates from the Moon and Sun (Table 9) are summed and applied linearly in time, as given by Eqs. (7.3.1)–(7.3.5). The mean anomaly, argument of perigee, and RAAN build on the values from Section 7.2, while the eccentricity and inclination start from their Brouwer mean values at epoch.
 
 $$
-M \mathrel{+}= \left(\dot{M}_M + \dot{M}_S\right) t \tag{7.3.1}
+M \mathrel{+}= \left(\dot{M}_M + \dot{M}_S\right) t \qquad (7.3.1)
 $$
 
 $$
-\omega \mathrel{+}= \left(\dot{\omega}_M + \dot{\omega}_S\right) t \tag{7.3.2}
+\omega \mathrel{+}= \left(\dot{\omega}_M + \dot{\omega}_S\right) t \qquad (7.3.2)
 $$
 
 $$
-\Omega \mathrel{+}= \left(\dot{\Omega}_M + \dot{\Omega}_S\right) t \tag{7.3.3}
+\Omega \mathrel{+}= \left(\dot{\Omega}_M + \dot{\Omega}_S\right) t \qquad (7.3.3)
 $$
 
 $$
-e = e_B + \left(\dot{e}_M + \dot{e}_S\right) t \tag{7.3.4}
+e = e_B + \left(\dot{e}_M + \dot{e}_S\right) t \qquad (7.3.4)
 $$
 
 $$
-i = i_B + \left(\dot{i}_M + \dot{i}_S\right) t \tag{7.3.5}
+i = i_B + \left(\dot{i}_M + \dot{i}_S\right) t \qquad (7.3.5)
 $$
 
 The secular rates are evaluated once during initialization using the lunar and solar geometry at the GP element set epoch, so they are constant over the propagation. The variation of the lunar and solar positions with time enters through the long-period periodic terms in Section 7.7.
@@ -1059,7 +1053,7 @@ Unlike the secular effects in Sections 7.2 and 7.3, the resonance effects are no
 The integration starts from the auxiliary longitude at epoch $\lambda_0$ (Table 10) and the Brouwer mean motion, as given by Eq. (7.4.1).
 
 $$
-n_0 = n_B \tag{7.4.1}
+n_0 = n_B \qquad (7.4.1)
 $$
 
 The integrator uses a fixed step of half a day in the direction of $t$, as given by Eq. (7.4.2). The number of whole steps $N$ and the remaining time $t_r$ are given by Eqs. (7.4.3)–(7.4.4). $N$ is never negative, and $t_r$ has the same sign as $t$ with $|t_r| < 720$ min.
@@ -1068,33 +1062,33 @@ $$
 h = \begin{cases}
 720 & t \ge 0 \\
 -720 & t < 0
-\end{cases} \tag{7.4.2}
+\end{cases} \qquad (7.4.2)
 $$
 
 $$
-N = \left\lfloor t / h \right\rfloor \tag{7.4.3}
+N = \left\lfloor t / h \right\rfloor \qquad (7.4.3)
 $$
 
 $$
-t_r = t - N h \tag{7.4.4}
+t_r = t - N h \qquad (7.4.4)
 $$
 
 At each step, the first and second time derivatives of $\lambda_i$ and $n_i$ are evaluated at the current state, as given by Eqs. (7.4.5)–(7.4.8). In Eq. (7.4.5), the integrated mean motion $n_i$ takes the place of $n_B$, which is excluded from $\dot{\lambda}_0$ (Table 10). Because $\dot{\lambda}_0$ is constant, Eq. (7.4.7) follows directly from Eq. (7.4.5).
 
 $$
-\dot{\lambda}_i = n_i + \dot{\lambda}_0 \tag{7.4.5}
+\dot{\lambda}_i = n_i + \dot{\lambda}_0 \qquad (7.4.5)
 $$
 
 $$
-\dot{n}_i = f\left(\lambda_i, \omega_i\right) \tag{7.4.6}
+\dot{n}_i = f\left(\lambda_i, \omega_i\right) \qquad (7.4.6)
 $$
 
 $$
-\ddot{\lambda}_i = \dot{n}_i \tag{7.4.7}
+\ddot{\lambda}_i = \dot{n}_i \qquad (7.4.7)
 $$
 
 $$
-\ddot{n}_i = \dot{\lambda}_i \frac{\partial f}{\partial \lambda_i} \tag{7.4.8}
+\ddot{n}_i = \dot{\lambda}_i \frac{\partial f}{\partial \lambda_i} \qquad (7.4.8)
 $$
 
 The function $f$ is a sum of resonance terms, each the sine of a combination of $\lambda_i$ and (for half-day resonance only) $\omega_i$. Equation (7.4.8) applies the chain rule through $\lambda_i$ only, so the variation of $\omega_i$ within a step is neglected. The specific forms of $f$ and $\partial f / \partial \lambda_i$ are given for half-day resonance in Eqs. (7.4.14)–(7.4.15) and for whole-day resonance in Eqs. (7.4.16)–(7.4.17).
@@ -1111,29 +1105,27 @@ The integration proceeds as follows.
 Each whole step is a second-order Taylor series, as given by Eqs. (7.4.9)–(7.4.10).
 
 $$
-\lambda_{i+1} = \lambda_i + \dot{\lambda}_i h + \frac{1}{2} \ddot{\lambda}_i h^2 \tag{7.4.9}
+\lambda_{i+1} = \lambda_i + \dot{\lambda}_i h + \frac{1}{2} \ddot{\lambda}_i h^2 \qquad (7.4.9)
 $$
 
 $$
-n_{i+1} = n_i + \dot{n}_i h + \frac{1}{2} \ddot{n}_i h^2 \tag{7.4.10}
+n_{i+1} = n_i + \dot{n}_i h + \frac{1}{2} \ddot{n}_i h^2 \qquad (7.4.10)
 $$
 
 The final partial step uses the same series with $t_r$ in place of $h$ and the derivatives at step $N$, giving the auxiliary longitude and mean motion at time $t$, as shown in Eqs. (7.4.11)–(7.4.12). If $N = 0$, the partial step is taken directly from the epoch.
 
 $$
-\lambda = \lambda_N + \dot{\lambda}_N t_r + \frac{1}{2} \ddot{\lambda}_N t_r^2 \tag{7.4.11}
+\lambda = \lambda_N + \dot{\lambda}_N t_r + \frac{1}{2} \ddot{\lambda}_N t_r^2 \qquad (7.4.11)
 $$
 
 $$
-n = n_N + \dot{n}_N t_r + \frac{1}{2} \ddot{n}_N t_r^2 \tag{7.4.12}
+n = n_N + \dot{n}_N t_r + \frac{1}{2} \ddot{n}_N t_r^2 \qquad (7.4.12)
 $$
-
-Every call integrates from the epoch, so the propagator holds no integration state between calls. Because the step size is fixed, this gives the same result as the cached integrator of Vallado et al. ([14]), at a cost that grows linearly with $|t|$.
 
 For half-day resonance, the resonance terms depend on the argument of perigee. Within the integrator, the argument of perigee advances with the zonal secular rate only, as given by Eq. (7.4.13), rather than using the values from Sections 7.2 and 7.3.
 
 $$
-\omega_i = \omega_B + \dot{\omega}_B \, i h \tag{7.4.13}
+\omega_i = \omega_B + \dot{\omega}_B \, i h \qquad (7.4.13)
 $$
 
 The mean motion rate $\dot{n}_i = f(\lambda_i, \omega_i)$ and its time derivative $\ddot{n}_i$ are given by Eqs. (7.4.14)–(7.4.15). The phase angles $G_{22}$, $G_{32}$, $G_{44}$, $G_{52}$, and $G_{54}$ are given in Table C1. The factors of 2 in Eq. (7.4.15) come from the terms with $2\lambda_i$ in their arguments. $\dot{\lambda}_i$ and $\ddot{\lambda}_i$ are given by the general Eqs. (7.4.5) and (7.4.7).
@@ -1145,8 +1137,7 @@ $$
 &\qquad + D_{4410} \sin\left(2\omega_i + 2\lambda_i - G_{44}\right) + D_{4422} \sin\left(2\lambda_i - G_{44}\right) \\
 &\qquad + D_{5220} \sin\left(\omega_i + \lambda_i - G_{52}\right) + D_{5232} \sin\left(-\omega_i + \lambda_i - G_{52}\right) \\
 &\qquad + D_{5421} \sin\left(\omega_i + 2\lambda_i - G_{54}\right) + D_{5433} \sin\left(-\omega_i + 2\lambda_i - G_{54}\right)
-\end{aligned}
-\tag{7.4.14}
+\end{aligned} \qquad (7.4.14)
 $$
 
 $$
@@ -1156,34 +1147,33 @@ $$
 &\qquad + 2 D_{4410} \cos\left(2\omega_i + 2\lambda_i - G_{44}\right) + 2 D_{4422} \cos\left(2\lambda_i - G_{44}\right) \\
 &\qquad + D_{5220} \cos\left(\omega_i + \lambda_i - G_{52}\right) + D_{5232} \cos\left(-\omega_i + \lambda_i - G_{52}\right) \\
 &\qquad + 2 D_{5421} \cos\left(\omega_i + 2\lambda_i - G_{54}\right) + 2 D_{5433} \cos\left(-\omega_i + 2\lambda_i - G_{54}\right) \Biggr]
-\end{aligned}
-\tag{7.4.15}
+\end{aligned} \qquad (7.4.15)
 $$
 
 For whole-day resonance, the resonance terms depend on $\lambda_i$ only, so the argument of perigee is not needed within the integrator. The mean motion rate $\dot{n}_i = f(\lambda_i)$ and its time derivative $\ddot{n}_i$ are given by Eqs. (7.4.16)–(7.4.17). The phase angles $\lambda_{31}$, $\lambda_{22}$, and $\lambda_{33}$ are given in Table C1. $\dot{\lambda}_i$ and $\ddot{\lambda}_i$ are given by the general Eqs. (7.4.5) and (7.4.7).
 
 $$
-\dot{n}_i = \delta_1 \sin\left(\lambda_i - \lambda_{31}\right) + \delta_2 \sin\left(2\left(\lambda_i - \lambda_{22}\right)\right) + \delta_3 \sin\left(3\left(\lambda_i - \lambda_{33}\right)\right) \tag{7.4.16}
+\dot{n}_i = \delta_1 \sin\left(\lambda_i - \lambda_{31}\right) + \delta_2 \sin\left(2\left(\lambda_i - \lambda_{22}\right)\right) + \delta_3 \sin\left(3\left(\lambda_i - \lambda_{33}\right)\right) \qquad (7.4.16)
 $$
 
 $$
-\ddot{n}_i = \dot{\lambda}_i \left[\delta_1 \cos\left(\lambda_i - \lambda_{31}\right) + 2 \delta_2 \cos\left(2\left(\lambda_i - \lambda_{22}\right)\right) + 3 \delta_3 \cos\left(3\left(\lambda_i - \lambda_{33}\right)\right)\right] \tag{7.4.17}
+\ddot{n}_i = \dot{\lambda}_i \left[\delta_1 \cos\left(\lambda_i - \lambda_{31}\right) + 2 \delta_2 \cos\left(2\left(\lambda_i - \lambda_{22}\right)\right) + 3 \delta_3 \cos\left(3\left(\lambda_i - \lambda_{33}\right)\right)\right] \qquad (7.4.17)
 $$
 
 The integrated mean motion $n$ from Eq. (7.4.12) replaces $n_B$ in the following steps. The mean anomaly is recovered from the integrated auxiliary longitude $\lambda$ from Eq. (7.4.11), replacing the value from Sections 7.2 and 7.3. This requires the Greenwich mean sidereal time at time $t$, given by Eq. (7.4.18), where $\theta_g$ is from Table 10 and $\dot{\theta}_E$ is from Table C1.
 
 $$
-\theta = \left(\theta_g + \dot{\theta}_E t\right) \bmod 2\pi \tag{7.4.18}
+\theta = \left(\theta_g + \dot{\theta}_E t\right) \bmod 2\pi \qquad (7.4.18)
 $$
 
 The half-day and whole-day relations are given by Eqs. (7.4.19)–(7.4.20), respectively. Both use $\theta$ from Eq. (7.4.18) and $\Omega$ at time $t$ from Sections 7.2 and 7.3. The whole-day relation also uses $\omega$ at time $t$ from Sections 7.2 and 7.3.
 
 $$
-M = \lambda - 2\Omega + 2\theta \tag{7.4.19}
+M = \lambda - 2\Omega + 2\theta \qquad (7.4.19)
 $$
 
 $$
-M = \lambda - \Omega - \omega + \theta \tag{7.4.20}
+M = \lambda - \Omega - \omega + \theta \qquad (7.4.20)
 $$
 
 ### 7.5 Account for Remaining Atmospheric Drag Effects
