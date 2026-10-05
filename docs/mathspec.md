@@ -233,7 +233,8 @@ Unless stated otherwise, the equations in Sections 6 and 7 use the internal SGP4
 - $J_n$ are zonal harmonics, and $k_2 = \frac{1}{2} J_2 a_E^2$ and $k_4 = -\frac{3}{8} J_4 a_E^4$ are the normalized zonal constants. $Q_{lm}$ and $\lambda_{lm}$ are the amplitude and phase of the $(l, m)$ tesseral harmonic.
 
 ### 4.3 Conventions
-- $x \bmod 2\pi$ follows C `fmod` semantics (Rust `%` on `f64`), so the result keeps the sign of $x$. This matters for the mean element recovery in Section 7.6.
+- $x \bmod 2\pi$ is the Euclidean remainder (Rust `rem_euclid` on `f64`), so the result is always in $[0, 2\pi)$.
+- $\mathrm{fmod}(x, 2\pi)$ follows C `fmod` semantics (Rust `%` on `f64`), so the result keeps the sign of $x$ and lies in $(-2\pi, 2\pi)$. This matters for the mean element recovery in Section 7.6.
 - $\mathrm{atan2}(y, x)$ is the four-quadrant inverse tangent.
 - $x \mathrel{+}= y$ and $x \mathrel{-}= y$ add $y$ to or subtract $y$ from the current value of a time-varying element $x$ during propagation (Section 7).
 - Equations are numbered by section, e.g., Eq. (6.2.3) is the third equation in Section 6.2.
@@ -276,6 +277,51 @@ The standard Earth model used by SGP4 is WGS-72 (see Table A1). The standard ref
 The SGP4 algorithm can be broken into two primary phases:
 1. Initialization - Calculating the time-independent propagation terms
 2. Propagation - Calculating the satellite state at a given time
+
+### 5.1 Diagram
+The flow of the SGP4 algorithm through the initialization (Section 6) and propagation (Section 7) phases is shown in Figure 1. Initialization runs once per GP element set and stores its results in an `Sgp4` struct. Propagation reads that struct and runs once for each requested time. Steps with a dashed outline are only applied to some satellites, as noted in each step.
+
+```mermaid
+flowchart LR
+    gp[/"GP element set (TLE or OMM)"/]
+
+    subgraph init["6. Initialization"]
+        direction TB
+        i1["6.1 Recover Brouwer mean elements"]
+        i2["6.2 Initialize atmospheric drag parameters"]
+        i3["6.3 Initialize Earth zonal harmonics parameters"]
+        i4["6.4 Initialize lunar and solar third-body parameters<br/>(deep-space only)"]
+        i5["6.5 Initialize Earth half-day and whole-day resonance effects<br/>(resonant satellites only)"]
+        i1 --> i2 --> i3 --> i4 --> i5
+    end
+
+    sgp4[("Sgp4 struct")]
+
+    subgraph prop["7. Propagation"]
+        direction TB
+        p1["7.1 Calculate the time since epoch"]
+        p2["7.2 Account for Earth zonal gravity and partial atmospheric drag effects"]
+        p3["7.3 Account for lunar and solar third-body secular effects<br/>(deep-space only)"]
+        p4["7.4 Account for Earth half-day and whole-day resonance effects<br/>(resonant satellites only)"]
+        p5["7.5 Account for remaining atmospheric drag effects"]
+        p6["7.6 Recover the mean elements"]
+        p7["7.7 Account for long-period periodic effects of lunar and solar gravity<br/>(deep-space only)"]
+        p8["7.8 Account for long-period periodic effects of Earth's gravity"]
+        p9["7.9 Solve Kepler's equation"]
+        p10["7.10 Account for short-period periodic effects of Earth's gravity"]
+        p11["7.11 Calculate position and velocity vectors in the TEME frame"]
+        p1 --> p2 --> p3 --> p4 --> p5 --> p6 --> p7 --> p8 --> p9 --> p10 --> p11
+    end
+
+    sv[/"Position and velocity in TEME"/]
+
+    gp --> init --> sgp4 --> prop --> sv
+
+    classDef conditional stroke-dasharray: 5 5
+    class i4,i5,p3,p4,p7 conditional
+```
+
+<p align="center"><strong>Figure 1.</strong> SGP4 initialization and propagation flow (deep-space satellites have an orbital period of at least 225 min, Eq. (6.4.1); resonance criteria are given in Eqs. (6.5.1)–(6.5.2))</p>
 
 ## 6. Initialization
 Initialization starts from a GP element set (see Table 1). The goal in the initialization process is to calculate the values required for propagation that are independent of time. In mako-sgp4, these values are stored in `Sgp4` structs. 
@@ -987,6 +1033,159 @@ The secular rates are evaluated once during initialization using the lunar and s
 ### 7.4 Account for Earth Half-Day and Whole-Day Resonance Effects
 Implemented in `sgp4_prop_delta`, `half_day_euler_maclaurin_step`, and `whole_day_euler_maclaurin_step` (`src/sgp4.rs`).
 
+We will define the Earth resonance integration variables with Table 14 below. Subscript $i$ denotes a value after $i$ integration steps from the GP element set epoch.
+
+| Variable | Symbol | Units | Definition | Code |
+| --- | --- | --- | --- | --- |
+| Auxiliary Longitude | $\lambda_{i}$ | radians | Resonance angle after $i$ integration steps | `lami` |
+| Integrated Mean Motion | $n_{i}$ | radians/min | Mean motion after $i$ integration steps | `ni` |
+| Auxiliary Longitude Rate | $\dot{\lambda}_{i}$ | radians/min | First time derivative of $\lambda_i$ | `lami_dot` |
+| Mean Motion Rate | $\dot{n}_{i}$ | radians/min^2 | First time derivative of $n_i$ | `ni_dot` |
+| Auxiliary Longitude Acceleration | $\ddot{\lambda}_{i}$ | radians/min^2 | Second time derivative of $\lambda_i$ | `lami_ddot` |
+| Mean Motion Acceleration | $\ddot{n}_{i}$ | radians/min^3 | Second time derivative of $n_i$ | `ni_ddot` |
+| Argument of Perigee at Step | $\omega_{i}$ | radians | Argument of perigee after $i$ integration steps (half-day resonance only) | `omegai` |
+| Step Size | $h$ | min | Integration step size, $\pm 720$ min | `step` |
+| Number of Steps | $N$ | - | Number of whole integration steps | `em_steps` |
+| Remaining Time | $t_{r}$ | min | Time remaining after $N$ whole steps | `t_em` |
+| Greenwich Sidereal Time | $\theta$ | radians | Greenwich mean sidereal time at time $t$ | `theta_t` |
+| Mean Motion | $n$ | radians/min | Mean motion at time $t$ | `n` |
+
+<p align="center"><strong>Table 14.</strong> Earth resonance integration variables (Code entries are local variables in <code>sgp4_prop_delta</code> and the <code>*_euler_maclaurin_step</code> functions)</p>
+
+The resonance effects are only applied to satellites that meet the half-day or whole-day resonance criteria of Eqs. (6.5.1)–(6.5.2). For all other satellites, this step is skipped and the mean motion remains $n = n_B$.
+
+Unlike the secular effects in Sections 7.2 and 7.3, the resonance effects are not applied in closed form. SGP4 numerically integrates the auxiliary longitude $\lambda$ and $n$ from the GP element set epoch to time $t$ using Euler-Maclaurin integration. The integration loop and the general form of the derivatives are the same for both resonances. Only the expression for $\dot{n}_i$, and therefore $\ddot{n}_i$, differs between them.
+
+The integration starts from the auxiliary longitude at epoch $\lambda_0$ (Table 10) and the Brouwer mean motion, as given by Eq. (7.4.1).
+
+$$
+n_0 = n_B \tag{7.4.1}
+$$
+
+The integrator uses a fixed step of half a day in the direction of $t$, as given by Eq. (7.4.2). The number of whole steps $N$ and the remaining time $t_r$ are given by Eqs. (7.4.3)–(7.4.4). $N$ is never negative, and $t_r$ has the same sign as $t$ with $|t_r| < 720$ min.
+
+$$
+h = \begin{cases}
+720 & t \ge 0 \\
+-720 & t < 0
+\end{cases} \tag{7.4.2}
+$$
+
+$$
+N = \left\lfloor t / h \right\rfloor \tag{7.4.3}
+$$
+
+$$
+t_r = t - N h \tag{7.4.4}
+$$
+
+At each step, the first and second time derivatives of $\lambda_i$ and $n_i$ are evaluated at the current state, as given by Eqs. (7.4.5)–(7.4.8). In Eq. (7.4.5), the integrated mean motion $n_i$ takes the place of $n_B$, which is excluded from $\dot{\lambda}_0$ (Table 10). Because $\dot{\lambda}_0$ is constant, Eq. (7.4.7) follows directly from Eq. (7.4.5).
+
+$$
+\dot{\lambda}_i = n_i + \dot{\lambda}_0 \tag{7.4.5}
+$$
+
+$$
+\dot{n}_i = f\left(\lambda_i, \omega_i\right) \tag{7.4.6}
+$$
+
+$$
+\ddot{\lambda}_i = \dot{n}_i \tag{7.4.7}
+$$
+
+$$
+\ddot{n}_i = \dot{\lambda}_i \frac{\partial f}{\partial \lambda_i} \tag{7.4.8}
+$$
+
+The function $f$ is a sum of resonance terms, each the sine of a combination of $\lambda_i$ and (for half-day resonance only) $\omega_i$. Equation (7.4.8) applies the chain rule through $\lambda_i$ only, so the variation of $\omega_i$ within a step is neglected. The specific forms of $f$ and $\partial f / \partial \lambda_i$ are given for half-day resonance in Eqs. (7.4.14)–(7.4.15) and for whole-day resonance in Eqs. (7.4.16)–(7.4.17).
+
+The integration proceeds as follows.
+1. Set $\lambda_0$ and $n_0$ (Eq. (7.4.1)), and calculate $h$, $N$, and $t_r$ (Eqs. (7.4.2)–(7.4.4)).
+2. Evaluate the derivatives at step 0 (Eqs. (7.4.5)–(7.4.8)).
+3. For $i = 0, 1, \ldots, N - 1$:
+   1. Advance $\lambda_i$ and $n_i$ by one whole step $h$ to $\lambda_{i+1}$ and $n_{i+1}$ (Eqs. (7.4.9)–(7.4.10)).
+   2. For half-day resonance, advance the argument of perigee to $\omega_{i+1}$ (Eq. (7.4.13)).
+   3. Re-evaluate the derivatives at step $i + 1$ (Eqs. (7.4.5)–(7.4.8)).
+4. Take a final partial step of length $t_r$ from step $N$ to time $t$ (Eqs. (7.4.11)–(7.4.12)).
+
+Each whole step is a second-order Taylor series, as given by Eqs. (7.4.9)–(7.4.10).
+
+$$
+\lambda_{i+1} = \lambda_i + \dot{\lambda}_i h + \frac{1}{2} \ddot{\lambda}_i h^2 \tag{7.4.9}
+$$
+
+$$
+n_{i+1} = n_i + \dot{n}_i h + \frac{1}{2} \ddot{n}_i h^2 \tag{7.4.10}
+$$
+
+The final partial step uses the same series with $t_r$ in place of $h$ and the derivatives at step $N$, giving the auxiliary longitude and mean motion at time $t$, as shown in Eqs. (7.4.11)–(7.4.12). If $N = 0$, the partial step is taken directly from the epoch.
+
+$$
+\lambda = \lambda_N + \dot{\lambda}_N t_r + \frac{1}{2} \ddot{\lambda}_N t_r^2 \tag{7.4.11}
+$$
+
+$$
+n = n_N + \dot{n}_N t_r + \frac{1}{2} \ddot{n}_N t_r^2 \tag{7.4.12}
+$$
+
+Every call integrates from the epoch, so the propagator holds no integration state between calls. Because the step size is fixed, this gives the same result as the cached integrator of Vallado et al. ([14]), at a cost that grows linearly with $|t|$.
+
+For half-day resonance, the resonance terms depend on the argument of perigee. Within the integrator, the argument of perigee advances with the zonal secular rate only, as given by Eq. (7.4.13), rather than using the values from Sections 7.2 and 7.3.
+
+$$
+\omega_i = \omega_B + \dot{\omega}_B \, i h \tag{7.4.13}
+$$
+
+The mean motion rate $\dot{n}_i = f(\lambda_i, \omega_i)$ and its time derivative $\ddot{n}_i$ are given by Eqs. (7.4.14)–(7.4.15). The phase angles $G_{22}$, $G_{32}$, $G_{44}$, $G_{52}$, and $G_{54}$ are given in Table C1. The factors of 2 in Eq. (7.4.15) come from the terms with $2\lambda_i$ in their arguments. $\dot{\lambda}_i$ and $\ddot{\lambda}_i$ are given by the general Eqs. (7.4.5) and (7.4.7).
+
+$$
+\begin{aligned}
+\dot{n}_i &= D_{2201} \sin\left(2\omega_i + \lambda_i - G_{22}\right) + D_{2211} \sin\left(\lambda_i - G_{22}\right) \\
+&\qquad + D_{3210} \sin\left(\omega_i + \lambda_i - G_{32}\right) + D_{3222} \sin\left(-\omega_i + \lambda_i - G_{32}\right) \\
+&\qquad + D_{4410} \sin\left(2\omega_i + 2\lambda_i - G_{44}\right) + D_{4422} \sin\left(2\lambda_i - G_{44}\right) \\
+&\qquad + D_{5220} \sin\left(\omega_i + \lambda_i - G_{52}\right) + D_{5232} \sin\left(-\omega_i + \lambda_i - G_{52}\right) \\
+&\qquad + D_{5421} \sin\left(\omega_i + 2\lambda_i - G_{54}\right) + D_{5433} \sin\left(-\omega_i + 2\lambda_i - G_{54}\right)
+\end{aligned}
+\tag{7.4.14}
+$$
+
+$$
+\begin{aligned}
+\ddot{n}_i &= \dot{\lambda}_i \Biggl[ D_{2201} \cos\left(2\omega_i + \lambda_i - G_{22}\right) + D_{2211} \cos\left(\lambda_i - G_{22}\right) \\
+&\qquad + D_{3210} \cos\left(\omega_i + \lambda_i - G_{32}\right) + D_{3222} \cos\left(-\omega_i + \lambda_i - G_{32}\right) \\
+&\qquad + 2 D_{4410} \cos\left(2\omega_i + 2\lambda_i - G_{44}\right) + 2 D_{4422} \cos\left(2\lambda_i - G_{44}\right) \\
+&\qquad + D_{5220} \cos\left(\omega_i + \lambda_i - G_{52}\right) + D_{5232} \cos\left(-\omega_i + \lambda_i - G_{52}\right) \\
+&\qquad + 2 D_{5421} \cos\left(\omega_i + 2\lambda_i - G_{54}\right) + 2 D_{5433} \cos\left(-\omega_i + 2\lambda_i - G_{54}\right) \Biggr]
+\end{aligned}
+\tag{7.4.15}
+$$
+
+For whole-day resonance, the resonance terms depend on $\lambda_i$ only, so the argument of perigee is not needed within the integrator. The mean motion rate $\dot{n}_i = f(\lambda_i)$ and its time derivative $\ddot{n}_i$ are given by Eqs. (7.4.16)–(7.4.17). The phase angles $\lambda_{31}$, $\lambda_{22}$, and $\lambda_{33}$ are given in Table C1. $\dot{\lambda}_i$ and $\ddot{\lambda}_i$ are given by the general Eqs. (7.4.5) and (7.4.7).
+
+$$
+\dot{n}_i = \delta_1 \sin\left(\lambda_i - \lambda_{31}\right) + \delta_2 \sin\left(2\left(\lambda_i - \lambda_{22}\right)\right) + \delta_3 \sin\left(3\left(\lambda_i - \lambda_{33}\right)\right) \tag{7.4.16}
+$$
+
+$$
+\ddot{n}_i = \dot{\lambda}_i \left[\delta_1 \cos\left(\lambda_i - \lambda_{31}\right) + 2 \delta_2 \cos\left(2\left(\lambda_i - \lambda_{22}\right)\right) + 3 \delta_3 \cos\left(3\left(\lambda_i - \lambda_{33}\right)\right)\right] \tag{7.4.17}
+$$
+
+The integrated mean motion $n$ from Eq. (7.4.12) replaces $n_B$ in the following steps. The mean anomaly is recovered from the integrated auxiliary longitude $\lambda$ from Eq. (7.4.11), replacing the value from Sections 7.2 and 7.3. This requires the Greenwich mean sidereal time at time $t$, given by Eq. (7.4.18), where $\theta_g$ is from Table 10 and $\dot{\theta}_E$ is from Table C1.
+
+$$
+\theta = \left(\theta_g + \dot{\theta}_E t\right) \bmod 2\pi \tag{7.4.18}
+$$
+
+The half-day and whole-day relations are given by Eqs. (7.4.19)–(7.4.20), respectively. Both use $\theta$ from Eq. (7.4.18) and $\Omega$ at time $t$ from Sections 7.2 and 7.3. The whole-day relation also uses $\omega$ at time $t$ from Sections 7.2 and 7.3.
+
+$$
+M = \lambda - 2\Omega + 2\theta \tag{7.4.19}
+$$
+
+$$
+M = \lambda - \Omega - \omega + \theta \tag{7.4.20}
+$$
+
 ### 7.5 Account for Remaining Atmospheric Drag Effects
 Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
 
@@ -1016,7 +1215,7 @@ mako-sgp4 is verified by two reference test suites in the `test/` directory, run
 | `test/vallado_cases.toml` | Vallado et al. [14] verification TLEs and ephemerides | 33 | Near-Earth and deep-space orbits, simplified drag, 12-hour and 24-hour resonance, Lyddane low inclination, decay, and an element set that must fail initialization |
 | `test/python-sgp4_cases.toml` | python-sgp4 (WGS-72, improved mode) | 16 | Near-circular, eccentric, sub-220 km perigee, $e_B < 10^{-4}$, Sun-synchronous, near-equatorial, negative $B^*$, high $B^*$, GEO, inclined GEO, Molniya, GPS MEO, GTO, low-inclination GTO over 10 years, retrograde equatorial LEO ($i_B = 180^\circ$), and retrograde deep-space MEO ($i_B = 179^\circ$) |
 
-<p align="center"><strong>Table 14.</strong> Verification test suites</p>
+<p align="center"><strong>Table 15.</strong> Verification test suites</p>
 
 ## Appendix A: World Geodetic System (WGS) Models
 
@@ -1094,6 +1293,11 @@ mako-sgp4 is verified by two reference test suites in the `test/` directory, run
 | `lam31` | $\lambda_{31}$ | radians | 0.13130908 | Phase angle of the (3, 1) tesseral harmonic (whole-day resonance) |
 | `lam22` | $\lambda_{22}$ | radians | 2.88431980 | Phase angle of the (2, 2) tesseral harmonic (whole-day resonance) |
 | `lam33` | $\lambda_{33}$ | radians | 0.37448087 | Phase angle of the (3, 3) tesseral harmonic (whole-day resonance) |
+| `g22` | $G_{22}$ | radians | 5.7686396 | Phase angle of the (2, 2) tesseral harmonic (half-day resonance) |
+| `g32` | $G_{32}$ | radians | 0.95240898 | Phase angle of the (3, 2) tesseral harmonic (half-day resonance) |
+| `g44` | $G_{44}$ | radians | 1.8014998 | Phase angle of the (4, 4) tesseral harmonic (half-day resonance) |
+| `g52` | $G_{52}$ | radians | 1.0508330 | Phase angle of the (5, 2) tesseral harmonic (half-day resonance) |
+| `g54` | $G_{54}$ | radians | 4.4108898 | Phase angle of the (5, 4) tesseral harmonic (half-day resonance) |
 
 <p align="center"><strong>Table C1.</strong> Earth resonance constants</p>
 
