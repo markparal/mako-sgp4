@@ -61,6 +61,8 @@ For a complete historical rundown of the development of SGP4, it is recommended 
 
 ## 3. GP Element Sets
 
+<div align="center">
+
 | Field | Symbol | Units | Description |
 | --- | --- | --- | --- |
 | Common Name | - | - | The commonly used name for the satellite |
@@ -80,6 +82,8 @@ For a complete historical rundown of the development of SGP4, it is recommended 
 | Mean Anomaly | $M_B$ | degrees | Orbital mean anomaly |
 | Mean Motion | $n_{K}$ | revolutions/day | Kozai Mean motion |
 | Revolution Number at Epoch | - | revs | Revolution number at epoch |
+
+</div>
 
 <p align="center"><strong>Table 1.</strong> Standard GP element set fields</p>
 
@@ -103,6 +107,8 @@ DDDDDDDDDDDDDDDDDDDDDDDD
 1 ANNNNC NNNNNPPP NNNNN.NNNNNNNN +.NNNNNNNN +NNNNN-N +NNNNN-N N NNNNN
 2 ANNNN NNN.NNNN NNN.NNNN NNNNNNN NNN.NNNN NNN.NNNN NN.NNNNNNNNNNNNNN
 ```
+
+<div align="center">
 
 | Line | Characters | Field | Units | Notes |
 | --- | --- | --- | --- | --- |
@@ -131,6 +137,8 @@ DDDDDDDDDDDDDDDDDDDDDDDD
 | 2 | 52-62 | Mean Motion | revolutions/day | |
 | 2 | 63-67 | Revolution Number at Epoch | revs | |
 | 2 | 68 | Checksum | - | Modulo 10 |
+
+</div>
 
 <p align="center"><strong>Table 2.</strong> TLE format (zero-based indexing)</p>
 
@@ -177,6 +185,8 @@ MEAN_MOTION_DDOT = 0
 
 The standards for the OMM format and its associated fields can be found at [13]. Table 3 describes what keyword correspond to what element field.
 
+<div align="center">
+
 | Keyword | Field | Units | Notes |
 | --- | --- | --- | --- |
 | CCSDS_OMM_VERS | - | - | Typically `2.0` |
@@ -204,6 +214,8 @@ The standards for the OMM format and its associated fields can be found at [13].
 | MEAN_MOTION_DOT | First Derivative of Mean Motion | revolutions/day^2 | OMM stores value divided by two (Space-Track standard, not CCSDS) |
 | MEAN_MOTION_DDOT | Second Derivative of Mean Motion | revolutions/day^3 | OMM stores value divided by six (Space-Track standard, not CCSDS) |
 
+</div>
+
 <p align="center"><strong>Table 3.</strong> OMM format</p>
 
 Because the OMM format follows a keyword-value pattern, it exists in multiple general-purpose data formats as well, including KVN (as the example above shows), XML, JSON, and CSV.
@@ -213,6 +225,8 @@ Because the OMM format follows a keyword-value pattern, it exists in multiple ge
 ### 4.1 Units
 Unless stated otherwise, the equations in Sections 6 and 7 use the internal SGP4 units below. Conversions to and from the distribution units (Table 1) and the output units (km and km/s) are noted where they occur.
 
+<div align="center">
+
 | Quantity | Internal Unit | Notes |
 | --- | --- | --- |
 | Distance | Earth radii | $a_E = 1$ Earth radius $= R_e$ km (Appendix A) |
@@ -221,6 +235,8 @@ Unless stated otherwise, the equations in Sections 6 and 7 use the internal SGP4
 | Mean motion | radians/min | $n_K$ is converted from revolutions/day by $n_K \cdot 2\pi / 1440$ |
 | Rates | per minute | Except the lunar and solar constants in Appendix B, which are per day |
 | Dates | days | Julian dates in UTC |
+
+</div>
 
 <p align="center"><strong>Table 4.</strong> Internal units</p>
 
@@ -240,6 +256,9 @@ Unless stated otherwise, the equations in Sections 6 and 7 use the internal SGP4
 - Equations are numbered by section, e.g., Eq. (6.2.3) is the third equation in Section 6.2.
 
 ### 4.4 Acronyms
+
+<div align="center">
+
 | Acronym | Meaning |
 | --- | --- |
 | CCSDS | Consultative Committee for Space Data Systems |
@@ -262,6 +281,8 @@ Unless stated otherwise, the equations in Sections 6 and 7 use the internal SGP4
 | UTC | Coordinated universal time |
 | UT1 | Universal time 1 (Earth rotation angle time scale) |
 | WGS | World geodetic system |
+
+</div>
 
 <p align="center"><strong>Table 5.</strong> Acronyms</p>
 
@@ -338,6 +359,8 @@ Implemented in `init_sgp4` (`src/sgp4.rs`), stored in `Sgp4.brouwer0`.
 
 We will define the Brouwer mean element set with Table 6 below.
 
+<div align="center">
+
 | Element | Symbol | Units | Definition | Code |
 | --- | --- | --- | --- | --- |
 | Inclination | $i_{B}$ | radians | Orbital inclination | `brouwer0.i` |
@@ -350,6 +373,8 @@ We will define the Brouwer mean element set with Table 6 below.
 | Mean Motion | $n_{B}$ | radians/min | Brouwer mean motion | `brouwer0.n` |
 | Semi-major Axis | $a_{B}$ | Earth radii | Semi-major axis | `brouwer0.a` |
 | Period | $T_{B}$ | min | Orbital period | `brouwer0.period` |
+
+</div>
 
 <p align="center"><strong>Table 6.</strong> Brouwer mean element set (Code fields are on <code>Sgp4</code>)</p>
 
@@ -390,6 +415,8 @@ Implemented in `init_atm_effects` (`src/sgp4.rs`), stored in `Sgp4.atm_params`.
 
 We will define the atmospheric drag parameters with Table 7 below.
 
+<div align="center">
+
 | Parameter | Symbol | Units | Definition | Code |
 | --- | --- | --- | --- | --- |
 | Perigee Height | $h_{p}$ | km | Perigee height | `atm_params.hp` |
@@ -404,6 +431,8 @@ We will define the atmospheric drag parameters with Table 7 below.
 | D2 | $D_{2}$ | 1 / min^2 | Higher-order drag coefficient | `atm_params.d2` |
 | D3 | $D_{3}$ | 1 / min^3 | Higher-order drag coefficient | `atm_params.d3` |
 | D4 | $D_{4}$ | 1 / min^4 | Higher-order drag coefficient | `atm_params.d4` |
+
+</div>
 
 <p align="center"><strong>Table 7.</strong> Atmospheric drag parameters</p>
 
@@ -510,11 +539,15 @@ Implemented in `init_zonal_effects` (`src/sgp4.rs`), stored in `Sgp4.zonal_param
 
 We will define the Earth zonal harmonics parameters with Table 8 below.
 
+<div align="center">
+
 | Parameter | Symbol | Units | Definition | Code |
 | --- | --- | --- | --- | --- |
 | Mean Anomaly Rate | $\dot{M}_{B}$ | radians/min | Secular rate of change of mean anomaly due to the zonal harmonics, excluding the mean motion $n_B$ | `zonal_params.m_dot` |
 | Argument of Perigee Rate | $\dot{\omega}_{B}$ | radians/min | Secular rate of change of argument of perigee | `zonal_params.omega_dot` |
 | Right Ascension of Ascending Node Rate | $\dot{\Omega}_{B}$ | radians/min | Secular rate of change of the right ascension of the ascending node (RAAN) | `zonal_params.raan_dot` |
+
+</div>
 
 <p align="center"><strong>Table 8.</strong> Earth zonal harmonics parameters</p>
 
@@ -554,6 +587,8 @@ Implemented in `init_lunar_solar_effects` and `calc_lunar_solar_secular_rates` (
 
 We will define the lunar and solar third-body parameters with Table 9 below.
 
+<div align="center">
+
 | Parameter | Symbol | Units | Definition | Code |
 | --- | --- | --- | --- | --- |
 | Inclination Cosine | $\cos i_{X}$ | - | Cosine of third-body orbital inclination | `*_params.cos_i` |
@@ -591,6 +626,8 @@ We will define the lunar and solar third-body parameters with Table 9 below.
 | Mean Anomaly Rate | $\dot{M}_{X}$ | radians/min | Secular rate of change of satellite mean anomaly | `*_params.m_dot` |
 | Argument of Perigee Rate | $\dot{\omega}_{X}$ | radians/min | Secular rate of change of satellite argument of perigee | `*_params.omega_dot` |
 | Right Ascension of Ascending Node Rate | $\dot{\Omega}_{X}$ | radians/min | Secular rate of change of satellite right ascension of the ascending node (RAAN) | `*_params.raan_dot` |
+
+</div>
 
 <p align="center"><strong>Table 9.</strong> Lunar and solar third-body parameters (subscript <em>X</em> = <em>M</em> for the Moon, <em>X</em> = <em>S</em> for the Sun; in the Code column, <code>*</code> is <code>lunar</code> or <code>solar</code>)</p>
 
@@ -649,6 +686,8 @@ Implemented in `init_earth_gravity_resonance_halfday`, `init_earth_gravity_reson
 
 We will define the Earth resonance parameters with Table 10 below.
 
+<div align="center">
+
 | Parameter | Symbol | Units | Definition | Code |
 | --- | --- | --- | --- | --- |
 | Greenwich Sidereal Time | $\theta_{g}$ | radians | Greenwich mean sidereal time at the GP element set epoch | `*_resonance_params.theta_g` |
@@ -667,6 +706,8 @@ We will define the Earth resonance parameters with Table 10 below.
 | Delta1 | $\delta_{1}$ | radians/min^2 | Whole day resonance coefficient | `whole_day_resonance_params.delta1` |
 | Delta2 | $\delta_{2}$ | radians/min^2 | Whole day resonance coefficient | `whole_day_resonance_params.delta2` |
 | Delta3 | $\delta_{3}$ | radians/min^2 | Whole day resonance coefficient | `whole_day_resonance_params.delta3` |
+
+</div>
 
 <p align="center"><strong>Table 10.</strong> Earth resonance parameters (in the Code column, <code>*</code> is <code>half_day</code> or <code>whole_day</code>)</p>
 
@@ -744,6 +785,8 @@ $$
 G_{lpq} = g_0 + g_1 e_B + g_2 e_B^2 + g_3 e_B^3 \qquad (6.5.16)
 $$
 
+<div align="center">
+
 | Function | Eccentricity Range | $g_0$ | $g_1$ | $g_2$ | $g_3$ |
 | --- | --- | --- | --- | --- | --- |
 | $G_{211}$ | $e_B \le 0.65$ | 3.616 | -13.247 | 16.29 | 0 |
@@ -765,6 +808,8 @@ $$
 | $G_{532}$ | $e_B \ge 0.7$ | -40023.88 | 170470.89 | -242699.48 | 115605.82 |
 | $G_{533}$ | $e_B < 0.7$ | -919.2277 | 4988.61 | -9064.77 | 5542.21 |
 | $G_{533}$ | $e_B \ge 0.7$ | -37995.78 | 161616.52 | -229838.2 | 109377.94 |
+
+</div>
 
 <p align="center"><strong>Table 11.</strong> Half day resonance eccentricity function coefficients</p>
 
@@ -931,6 +976,8 @@ Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
 
 We will define the Earth zonal gravity and partial atmospheric drag variables with Table 12 below. Unlike the Brouwer mean elements at epoch (subscript $B$), the elements without a subscript are functions of $t$ and are updated in place by the remaining propagation steps.
 
+<div align="center">
+
 | Variable | Symbol | Units | Definition | Code |
 | --- | --- | --- | --- | --- |
 | Drag-Free Mean Anomaly | $M_{DF}$ | radians | Mean anomaly with the zonal secular rate applied | `m_df` |
@@ -941,6 +988,8 @@ We will define the Earth zonal gravity and partial atmospheric drag variables wi
 | Mean Anomaly | $M$ | radians | Mean anomaly at time $t$ | `m` |
 | Argument of Perigee | $\omega$ | radians | Argument of perigee at time $t$ | `omega` |
 | Right Ascension of Ascending Node | $\Omega$ | radians | RAAN at time $t$ | `raan` |
+
+</div>
 
 <p align="center"><strong>Table 12.</strong> Earth zonal gravity and partial atmospheric drag variables (Code entries are local variables in <code>sgp4_prop_delta</code>)</p>
 
@@ -991,10 +1040,14 @@ Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
 
 We will define the lunar and solar third-body secular variables with Table 13 below. These join the time-varying elements of Table 12.
 
+<div align="center">
+
 | Variable | Symbol | Units | Definition | Code |
 | --- | --- | --- | --- | --- |
 | Eccentricity | $e$ | - | Eccentricity at time $t$ | `e` |
 | Inclination | $i$ | radians | Inclination at time $t$ | `i` |
+
+</div>
 
 <p align="center"><strong>Table 13.</strong> Lunar and solar third-body secular variables (Code entries are local variables in <code>sgp4_prop_delta</code>)</p>
 
@@ -1029,6 +1082,8 @@ Implemented in `sgp4_prop_delta`, `half_day_euler_maclaurin_step`, and `whole_da
 
 We will define the Earth resonance integration variables with Table 14 below. Subscript $i$ denotes a value after $i$ integration steps from the GP element set epoch.
 
+<div align="center">
+
 | Variable | Symbol | Units | Definition | Code |
 | --- | --- | --- | --- | --- |
 | Auxiliary Longitude | $\lambda_{i}$ | radians | Resonance angle after $i$ integration steps | `lami` |
@@ -1043,6 +1098,8 @@ We will define the Earth resonance integration variables with Table 14 below. Su
 | Remaining Time | $t_{r}$ | min | Time remaining after $N$ whole steps | `t_em` |
 | Greenwich Sidereal Time | $\theta$ | radians | Greenwich mean sidereal time at time $t$ | `theta_t` |
 | Mean Motion | $n$ | radians/min | Mean motion at time $t$ | `n` |
+
+</div>
 
 <p align="center"><strong>Table 14.</strong> Earth resonance integration variables (Code entries are local variables in <code>sgp4_prop_delta</code> and the <code>*_euler_maclaurin_step</code> functions)</p>
 
@@ -1200,14 +1257,20 @@ Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
 ## 8. Verification
 mako-sgp4 is verified by two reference test suites in the `test/` directory, run by `cargo test`. Each reference state is propagated through both `sgp4_prop_delta` (minutes since epoch) and `sgp4_prop_datetime` (UTC datetime). Each position and velocity component of the state must agree with the reference to within $10^{-6}$ km and $10^{-6}$ km/s (1 mm and 1 mm/s).
 
+<div align="center">
+
 | Suite | Source | Cases | Coverage |
 | --- | --- | --- | --- |
 | `test/vallado_cases.toml` | Vallado et al. [14] verification TLEs and ephemerides | 33 | Near-Earth and deep-space orbits, simplified drag, 12-hour and 24-hour resonance, Lyddane low inclination, decay, and an element set that must fail initialization |
 | `test/python-sgp4_cases.toml` | python-sgp4 (WGS-72, improved mode) | 16 | Near-circular, eccentric, sub-220 km perigee, $e_B < 10^{-4}$, Sun-synchronous, near-equatorial, negative $B^*$, high $B^*$, GEO, inclined GEO, Molniya, GPS MEO, GTO, low-inclination GTO over 10 years, retrograde equatorial LEO ($i_B = 180^\circ$), and retrograde deep-space MEO ($i_B = 179^\circ$) |
 
+</div>
+
 <p align="center"><strong>Table 15.</strong> Verification test suites</p>
 
 ## Appendix A: World Geodetic System (WGS) Models
+
+<div align="center">
 
 | Variable | Symbol | Units | Value | Description |
 | --- | --- | --- | --- | --- |
@@ -1220,7 +1283,11 @@ mako-sgp4 is verified by two reference test suites in the `test/` directory, run
 | `k4` | $k_{4}$ | Earth radii^4 | 0.00000062098875 | $k_{4} = -\frac{3}{8} J_{4}$ |
 | `ke` | $k_{e}$ | Earth radii^1.5 / min | 0.07436691613317 | $k_{e} = 60 \sqrt{\mu_{e} / R_{e}^{3}}$, the square root of $\mu_{e}$ in Earth radii^1.5 / min |
 
+</div>
+
 <p align="center"><strong>Table A1.</strong> WGS-72 constants (SGP4 default)</p>
+
+<div align="center">
 
 | Variable | Symbol | Units | Value | Description |
 | --- | --- | --- | --- | --- |
@@ -1233,9 +1300,13 @@ mako-sgp4 is verified by two reference test suites in the `test/` directory, run
 | `k4` | $k_{4}$ | Earth radii^4 | 0.0000006041203538 | $k_{4} = -\frac{3}{8} J_{4}$ |
 | `ke` | $k_{e}$ | Earth radii^1.5 / min | 0.07436685316871 | $k_{e} = 60 \sqrt{\mu_{e} / R_{e}^{3}}$, the square root of $\mu_{e}$ in Earth radii^1.5 / min |
 
+</div>
+
 <p align="center"><strong>Table A2.</strong> WGS-84 constants</p>
 
 ## Appendix B: Constants for the Sun and Moon
+
+<div align="center">
 
 | Variable | Symbol | Units | Value | Description |
 | --- | --- | --- | --- | --- |
@@ -1251,7 +1322,11 @@ mako-sgp4 is verified by two reference test suites in the `test/` directory, run
 | `m_s0` | $M_{S0}$ | radians | 6.2565837 | Solar mean anomaly at the lunar/solar element epoch |
 | `m_s0_dot` | $\dot{M}_{S0}$ | radians/day | 0.017201977 | Solar mean anomaly time rate of change at the lunar/solar element epoch |
 
+</div>
+
 <p align="center"><strong>Table B1.</strong> Solar model constants</p>
+
+<div align="center">
 
 | Variable | Symbol | Units | Value | Description |
 | --- | --- | --- | --- | --- |
@@ -1266,9 +1341,13 @@ mako-sgp4 is verified by two reference test suites in the `test/` directory, run
 | `m_m0` | $M_{M0}$ | radians | 4.7199672 | Lunar mean anomaly at the lunar/solar element epoch |
 | `m_m0_dot` | $\dot{M}_{M0}$ | radians/day | 0.22997150 | Lunar mean anomaly time rate of change at the lunar/solar element epoch |
 
+</div>
+
 <p align="center"><strong>Table B2.</strong> Lunar model constants</p>
 
 ## Appendix C: Constants for Earth Resonance
+
+<div align="center">
 
 | Variable | Symbol | Units | Value | Description |
 | --- | --- | --- | --- | --- |
@@ -1289,6 +1368,8 @@ mako-sgp4 is verified by two reference test suites in the `test/` directory, run
 | `g52` | $G_{52}$ | radians | 1.0508330 | Phase angle of the (5, 2) tesseral harmonic (half-day resonance) |
 | `g54` | $G_{54}$ | radians | 4.4108898 | Phase angle of the (5, 4) tesseral harmonic (half-day resonance) |
 
+</div>
+
 <p align="center"><strong>Table C1.</strong> Earth resonance constants</p>
 
 ## Thanks
@@ -1298,9 +1379,13 @@ Thank you!
 
 ## Revision History
 
+<div align="center">
+
 | Revision | Date | Crate Version | Changes |
 | --- | --- | --- | --- |
 | 1 | 2026-10-04 | 0.2.0 | Initial release: GP element set formats, initialization, verification |
+
+</div>
 
 ## References
 - [1] [Solution of the Problem of Artificial Satellite Theory Without Drag by Brouwer](https://ui.adsabs.harvard.edu/abs/1959AJ.....64..378B/abstract)
