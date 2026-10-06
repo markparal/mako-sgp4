@@ -1236,6 +1236,74 @@ $$
 ### 7.5 Account for Remaining Atmospheric Drag Effects
 Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
 
+We will define the remaining atmospheric drag variables with Table 15 below. These join the time-varying elements of Tables 12–14.
+
+<div align="center">
+
+| Variable | Symbol | Units | Definition | Code |
+| --- | --- | --- | --- | --- |
+| Semi-major Axis | $a$ | Earth radii | Semi-major axis at time $t$ | `a` |
+| Mean Longitude Drag Correction | $\delta L$ | radians | Drag correction to the mean longitude | `il_atm` |
+
+</div>
+
+<p align="center"><strong>Table 15.</strong> Remaining atmospheric drag variables (Code entries are local variables in <code>sgp4_prop_delta</code>)</p>
+
+This step applies the drag effects on the semi-major axis, eccentricity, and mean longitude that were deferred in Section 7.2. Unlike Sections 7.3 and 7.4, it is applied to all satellites. The semi-major axis is recovered from the mean motion $n$, so $n$ must be positive.
+
+As in Section 7.2, SGP4 uses two drag models. The full drag model applies to near-Earth satellites with a perigee height $h_p \ge 220$ km (Eq. (6.2.3)). The simplified drag model applies to deep-space satellites (Eq. (6.4.1)) and to satellites with $h_p < 220$ km.
+
+For the full drag model, the eccentricity and semi-major axis are given by Eqs. (7.5.1)–(7.5.2). 
+
+$$
+e \mathrel{-}= B^{*} \left[C_4 t + C_5 \left(\sin M - \sin M_B\right)\right] \qquad (7.5.1)
+$$
+
+$$
+a = \left(\frac{k_e}{n}\right)^{2/3} \left(1 - C_1 t - D_2 t^2 - D_3 t^3 - D_4 t^4\right)^2 \qquad (7.5.2)
+$$
+
+For the simplified drag model, the eccentricity and semi-major axis are given by Eqs. (7.5.3)–(7.5.4).
+
+$$
+e \mathrel{-}= B^{*} C_4 t \qquad (7.5.3)
+$$
+
+$$
+a = \left(\frac{k_e}{n}\right)^{2/3} \left(1 - C_1 t\right)^2 \qquad (7.5.4)
+$$
+
+In both models, $(k_e / n)^{2/3}$ equals $a_B$ (Eq. (6.1.6)) unless $n$ was integrated in Section 7.4. The mean motion is then updated from the decayed semi-major axis with Eq. (7.5.5), so that $n$ increases as the orbit decays.
+
+$$
+n = \frac{k_e}{a^{3/2}} \qquad (7.5.5)
+$$
+
+The drag correction to the mean longitude is given by Eqs. (7.5.6)–(7.5.7), respectively. Both use the Brouwer mean motion $n_B$ rather than the updated $n$.
+
+$$
+\begin{aligned}
+\delta L &= n_B \Biggl[ \frac{3}{2} C_1 t^2 + \left(D_2 + 2 C_1^2\right) t^3 + \frac{1}{4} \left(3 D_3 + 12 C_1 D_2 + 10 C_1^3\right) t^4 \\
+&\qquad + \frac{1}{5} \left(3 D_4 + 12 C_1 D_3 + 6 D_2^2 + 30 C_1^2 D_2 + 15 C_1^4\right) t^5 \Biggr]
+\end{aligned} \qquad (7.5.6)
+$$
+
+$$
+\delta L = \frac{3}{2} n_B C_1 t^2 \qquad (7.5.7)
+$$
+
+The correction is applied to the mean anomaly, as given by Eq. (7.5.8). Because the mean longitude is $L = M + \omega + \Omega$, adding $\delta L$ to $M$ is equivalent to adding it to $L$. In the code, this addition is made at the start of the mean element recovery (Section 7.6), after $\sin M$ has been used in Eq. (7.5.1).
+
+$$
+M \mathrel{+}= \delta L \qquad (7.5.8)
+$$
+
+Finally, the eccentricity is checked. If $e < -0.001$ or $e \ge 1$, propagation is invalid. A small negative eccentricity is tolerated, as drag can push a near-circular orbit slightly below zero, and is then floored as given by Eq. (7.5.9). The floor and the $-0.001$ tolerance follow Vallado et al. ([14]).
+
+$$
+e = \max\left(e, 10^{-6}\right) \qquad (7.5.9)
+$$
+
 ### 7.6 Recover the Mean Elements
 Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
 
@@ -1266,7 +1334,7 @@ mako-sgp4 is verified by two reference test suites in the `test/` directory, run
 
 </div>
 
-<p align="center"><strong>Table 15.</strong> Verification test suites</p>
+<p align="center"><strong>Table 16.</strong> Verification test suites</p>
 
 ## Appendix A: World Geodetic System (WGS) Models
 
