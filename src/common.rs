@@ -39,6 +39,9 @@ pub struct Wgs {
     /// Earth's equatorial radius \[km\]
     pub r_earth_eq: f64,
 
+    /// Earth's flattening \[\]
+    pub flattening: f64,
+
     /// Earth's J2 harmonic \[\]
     pub j2: f64,
 
@@ -152,6 +155,7 @@ pub enum CoordinateFrame {
 ///
 /// - `mu`: 398600.8 - standard gravitational parameter \[km^3 / s^2\]
 /// - `r_earth_eq`: 6378.135 - Earth's equatorial radius \[km\]
+/// - `flattening`: 1 / 298.26 - Earth's flattening
 /// - `j2`: 0.001082616 - second zonal harmonic (Earth's oblateness)
 /// - `k2`: 0.000541308 - `0.5 * j2` \[Earth radii^2\]
 /// - `j3`: -0.00000253881 - third zonal harmonic (pear-shaped component)
@@ -172,6 +176,7 @@ pub enum CoordinateFrame {
 pub const WGS72: Wgs = Wgs {
     mu: 398600.8,
     r_earth_eq: 6378.135,
+    flattening: 1. / 298.26,
     j2: 0.001082616,
     k2: 0.000541308,
     j3: -0.00000253881,
@@ -186,6 +191,7 @@ pub const WGS72: Wgs = Wgs {
 ///
 /// - `mu`: 398600.5 - standard gravitational parameter \[km^3 / s^2\]
 /// - `r_earth_eq`: 6378.137 - Earth's equatorial radius \[km\]
+/// - `flattening`: 1 / 298.257223563 - Earth's flattening
 /// - `j2`: 0.00108262998905 - second zonal harmonic (Earth's oblateness)
 /// - `k2`: 0.000541314994525 - `0.5 * j2` \[Earth radii^2\]
 /// - `j3`: -0.00000253215306 - third zonal harmonic (pear-shaped component)
@@ -207,6 +213,7 @@ pub const WGS72: Wgs = Wgs {
 pub const WGS84: Wgs = Wgs {
     mu: 398600.5,
     r_earth_eq: 6378.137,
+    flattening: 1. / 298.257223563,
     j2: 0.00108262998905,
     k2: 0.000541314994525,
     j3: -0.00000253215306,

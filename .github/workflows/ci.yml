@@ -18,11 +18,11 @@ jobs:
     - uses: dtolnay/rust-toolchain@stable
       with:
         components: rustfmt, clippy
-    - run: cargo fmt --check
-    - run: cargo clippy --all-targets --all-features -- -D warnings
-    - run: cargo test
-    - run: cargo test --no-default-features
-    - run: cargo doc --no-deps
+    - run: cargo fmt --all --check
+    - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+    - run: cargo test --workspace
+    - run: cargo test -p mako-sgp4 --no-default-features
+    - run: cargo doc --workspace --no-deps
     - run: cargo package --list
     - name: Run examples
       run: |
@@ -41,3 +41,17 @@ jobs:
           cargo run --all-features --example "${name}"
           echo "::endgroup::"
         done
+
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: wasm32-unknown-unknown
+    - uses: taiki-e/install-action@v2
+      with:
+        tool: wasm-pack
+    - run: cargo check -p mako-sgp4 --target wasm32-unknown-unknown --no-default-features
+    - run: cargo check -p mako-sgp4 --target wasm32-unknown-unknown --all-features
+    - run: wasm-pack build wasm --target web --profile wasm-release
