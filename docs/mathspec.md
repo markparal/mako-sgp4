@@ -1307,6 +1307,49 @@ $$
 ### 7.6 Recover the Mean Elements
 Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
 
+After Sections 7.2–7.5, the secular and drag effects have all been applied, and the time-varying elements form a mean element set at time $t$. We will define this mean element set with Table 16 below.
+
+<div align="center">
+
+| Element | Symbol | Units | Definition | Code |
+| --- | --- | --- | --- | --- |
+| Inclination | $i$ | radians | Inclination at time $t$ (Section 7.3) | `i` |
+| Right Ascension of Ascending Node | $\Omega$ | radians | RAAN at time $t$ (Sections 7.2–7.3) | `raan` |
+| Eccentricity | $e$ | - | Eccentricity at time $t$ (Sections 7.3 and 7.5) | `e` |
+| Argument of Perigee | $\omega$ | radians | Argument of perigee at time $t$ (Sections 7.2–7.3) | `omega` |
+| Mean Anomaly | $M$ | radians | Mean anomaly at time $t$ (Sections 7.2–7.5) | `m` |
+| Mean Longitude | $L$ | radians | $L = M + \omega + \Omega$ | `lm` |
+| Mean Motion | $n$ | radians/min | Mean motion at time $t$ (Sections 7.4–7.5) | `n` |
+| Semi-major Axis | $a$ | Earth radii | Semi-major axis at time $t$ (Section 7.5) | `a` |
+
+</div>
+
+<p align="center"><strong>Table 16.</strong> Mean element set at time <i>t</i> (Code entries are local variables in <code>sgp4_prop_delta</code>)</p>
+
+The angles $M$, $\omega$, and $\Omega$ grow without bound with $t$, so they are wrapped before the periodic effects are applied. The mean longitude is wrapped first, as given by Eq. (7.6.1), and then the RAAN and argument of perigee, as given by Eqs. (7.6.2)–(7.6.3).
+
+$$
+L = \mathrm{fmod}\left(M + \omega + \Omega, 2\pi\right) \qquad (7.6.1)
+$$
+
+$$
+\Omega = \mathrm{fmod}\left(\Omega, 2\pi\right) \qquad (7.6.2)
+$$
+
+$$
+\omega = \mathrm{fmod}\left(\omega, 2\pi\right) \qquad (7.6.3)
+$$
+
+The mean anomaly is then recovered from the wrapped angles, as given by Eq. (7.6.4). Because $M$ is recovered from $L$ rather than wrapped directly, $M + \omega + \Omega$ equals $L$ to within a multiple of $2\pi$, and any rounding from the wrapping is absorbed into $M$.
+
+$$
+M = \mathrm{fmod}\left(L - \omega - \Omega, 2\pi\right) \qquad (7.6.4)
+$$
+
+The wrapping uses $\mathrm{fmod}$ rather than $\bmod$ (Section 4.3), so each angle keeps its sign and lies in $(-2\pi, 2\pi)$. 
+
+The inclination, eccentricity, mean motion, and semi-major axis are not changed in this step.
+
 ### 7.7 Account for Long-Period Periodic Effects of Lunar and Solar Gravity
 Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
 
@@ -1334,7 +1377,7 @@ mako-sgp4 is verified by two reference test suites in the `test/` directory, run
 
 </div>
 
-<p align="center"><strong>Table 16.</strong> Verification test suites</p>
+<p align="center"><strong>Table 17.</strong> Verification test suites</p>
 
 ## Appendix A: World Geodetic System (WGS) Models
 
