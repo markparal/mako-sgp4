@@ -102,6 +102,12 @@ pub enum DateError {
 
     /// The datetime is not in UTC
     DateNotUTC,
+
+    /// The month is outside 1-12 or the day is outside the days in that month
+    InvalidCalendarDate,
+
+    /// The hour, minute, or second is outside its range (0-23, 0-59, 0.0 to less than 61.0)
+    InvalidTimeOfDay,
 }
 
 /// Timezone options for datetime representation
@@ -150,6 +156,95 @@ pub enum Timezone {
 // Functions
 // ---------
 
+/// Validate the calendar and clock fields of a datetime
+///
+/// Checks that the month is 1-12, the day exists in that month (Gregorian leap
+/// years), the hour is 0-23, the minute is 0-59, and the second is finite and in
+/// the range 0.0 to less than 61.0 (a UTC leap second may reach 60.999...).
+///
+/// # Arguments
+/// * `datetime` - The datetime as a [`DateTime`] structure
+///
+/// # Returns
+/// * `Ok(())` - If every field is in range
+/// * `Err(DateError)` - If a field is out of range
+///
+/// # Errors
+/// * `DateError::InvalidCalendarDate` - If the month or day is out of range
+/// * `DateError::InvalidTimeOfDay` - If the hour, minute, or second is out of range
+///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::time::{DateError, DateTime, Timezone, validate_datetime};
+///
+/// // February 29th only exists in leap years
+/// let mut datetime = DateTime {
+///     year: 2024,
+///     month: 2,
+///     day: 29,
+///     hour: 23,
+///     minute: 59,
+///     second: 59.5,
+///     timezone: Timezone::UTC,
+/// };
+/// assert!(validate_datetime(&datetime).is_ok());
+///
+/// // Assert 2023-02-29 is rejected
+/// datetime.year = 2023;
+/// assert_eq!(validate_datetime(&datetime), Err(DateError::InvalidCalendarDate));
+/// ```
+///
+/// # References
+/// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
+pub fn validate_datetime(datetime: &DateTime) -> Result<(), DateError> {
+    // Validate month and day of month
+    if !(1..=12).contains(&datetime.month)
+        || datetime.day < 1
+        || datetime.day > days_in_month(datetime.year, datetime.month)
+    {
+        return Err(DateError::InvalidCalendarDate);
+    }
+
+    // Validate time of day. Allow second 60 for UTC leap seconds
+    if !(0..=23).contains(&datetime.hour)
+        || !(0..=59).contains(&datetime.minute)
+        || !(0.0..61.0).contains(&datetime.second)
+    {
+        return Err(DateError::InvalidTimeOfDay);
+    }
+
+    Ok(())
+}
+
+/// Check whether a year is a Gregorian leap year
+///
+/// # Arguments
+/// * `year` - The year
+///
+/// # Returns
+/// * `is_leap` - True if the year has 366 days
+fn is_leap_year(year: i32) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+}
+
+/// Number of days in a month of a given year
+///
+/// # Arguments
+/// * `year` - The year
+/// * `month` - The month (1-12)
+///
+/// # Returns
+/// * `days` - The number of days in the month, or 0 if the month is out of range
+fn days_in_month(year: i32, month: i32) -> i32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if is_leap_year(year) => 29,
+        2 => 28,
+        _ => 0,
+    }
+}
+
 /// Convert a datetime in UTC to Julian date (JD) format.
 ///
 /// The Julian date is a continuous count of days since 4713-01-01 12:00:00 BCE (Julian calendar).
@@ -166,6 +261,8 @@ pub enum Timezone {
 /// # Errors
 /// * `DateError::DateTooEarly` - If the date is before October 10th, 1582
 /// * `DateError::DateNotUTC` - If the datetime is not in UTC
+/// * `DateError::InvalidCalendarDate` - If the month or day is out of range
+/// * `DateError::InvalidTimeOfDay` - If the hour, minute, or second is out of range
 ///
 /// # Examples
 /// ```rust
@@ -227,6 +324,8 @@ pub fn utc2jday(utc_datetime: &DateTime) -> Result<(f64, f64), DateError> {
 /// # Errors
 /// * `DateError::DateTooEarly` - If the date is before October 10th, 1582
 /// * `DateError::DateNotUTC` - If the datetime is not in UTC
+/// * `DateError::InvalidCalendarDate` - If the month or day is out of range
+/// * `DateError::InvalidTimeOfDay` - If the hour, minute, or second is out of range
 ///
 /// # Examples
 /// ```rust
@@ -260,6 +359,9 @@ pub fn utc2mjday(utc_datetime: &DateTime) -> Result<(f64, f64), DateError> {
     if utc_datetime.timezone != Timezone::UTC {
         return Err(DateError::DateNotUTC);
     }
+
+    // Verify calendar and clock fields are in range
+    validate_datetime(utc_datetime)?;
 
     // Verify date is after Oct 10th, 1582
     if utc_datetime.year < 1582
@@ -319,7 +421,7 @@ pub fn utc2mjday(utc_datetime: &DateTime) -> Result<(f64, f64), DateError> {
 /// * `Err(DateError)` - If the day of year is out of range
 ///
 /// # Errors
-/// * `DateError::InvalidDayOfYear` - If the day of year is less than 1 or exceeds the number of days in the year
+/// * `DateError::InvalidDayOfYear` - If the day of year is not finite, is less than 1, or exceeds the number of days in the year
 ///
 /// # Examples
 /// ```rust
@@ -340,13 +442,13 @@ pub fn utc2mjday(utc_datetime: &DateTime) -> Result<(f64, f64), DateError> {
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [Satellite Orbits by Montenbruck et al](https://link.springer.com/book/10.1007/978-3-642-58351-3)
 pub fn dayofyr2utc(year: i32, dayofyr: f64) -> Result<DateTime, DateError> {
-    // Validate day of year is positive
-    if dayofyr < 1.0 {
+    // Validate day of year is finite and positive
+    if !dayofyr.is_finite() || dayofyr < 1.0 {
         return Err(DateError::InvalidDayOfYear);
     }
 
     // Check for leap year
-    let is_leap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+    let is_leap = is_leap_year(year);
 
     // Days per month (non-leap year)
     let days_per_month = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
@@ -456,6 +558,127 @@ pub fn dayofyr2utc(year: i32, dayofyr: f64) -> Result<DateTime, DateError> {
 mod tests {
     use super::*;
 
+    /// Validate calendar and clock ranges
+    ///
+    /// Covers leap years (including the century rule), month and day bounds,
+    /// time-of-day bounds, leap seconds, non-finite seconds, and non-finite day of year.
+    ///
+    /// # Panics
+    /// * If a field is accepted or rejected incorrectly
+    #[test]
+    fn test_validate_datetime() {
+        let valid = DateTime {
+            year: 2024,
+            month: 2,
+            day: 29,
+            hour: 23,
+            minute: 59,
+            second: 60.5,
+            timezone: Timezone::UTC,
+        };
+        assert_eq!(validate_datetime(&valid), Ok(()));
+
+        // Century rule: 1900 is not a leap year, 2000 is
+        let cases = [
+            (
+                DateTime {
+                    year: 1900,
+                    ..valid
+                },
+                Err(DateError::InvalidCalendarDate),
+            ),
+            (
+                DateTime {
+                    year: 2000,
+                    ..valid
+                },
+                Ok(()),
+            ),
+            (
+                DateTime { month: 0, ..valid },
+                Err(DateError::InvalidCalendarDate),
+            ),
+            (
+                DateTime { month: 13, ..valid },
+                Err(DateError::InvalidCalendarDate),
+            ),
+            (
+                DateTime {
+                    month: 4,
+                    day: 31,
+                    ..valid
+                },
+                Err(DateError::InvalidCalendarDate),
+            ),
+            (
+                DateTime { day: 0, ..valid },
+                Err(DateError::InvalidCalendarDate),
+            ),
+            (
+                DateTime { hour: -1, ..valid },
+                Err(DateError::InvalidTimeOfDay),
+            ),
+            (
+                DateTime { hour: 24, ..valid },
+                Err(DateError::InvalidTimeOfDay),
+            ),
+            (
+                DateTime {
+                    minute: 60,
+                    ..valid
+                },
+                Err(DateError::InvalidTimeOfDay),
+            ),
+            (
+                DateTime {
+                    second: -0.1,
+                    ..valid
+                },
+                Err(DateError::InvalidTimeOfDay),
+            ),
+            (
+                DateTime {
+                    second: 61.0,
+                    ..valid
+                },
+                Err(DateError::InvalidTimeOfDay),
+            ),
+            (
+                DateTime {
+                    second: f64::NAN,
+                    ..valid
+                },
+                Err(DateError::InvalidTimeOfDay),
+            ),
+        ];
+        for (datetime, expected) in cases {
+            assert_eq!(validate_datetime(&datetime), expected, "{datetime:?}");
+        }
+
+        // Julian-date conversion rejects out-of-range fields
+        assert_eq!(
+            utc2jday(&DateTime { month: 13, ..valid }),
+            Err(DateError::InvalidCalendarDate)
+        );
+
+        // Day of year must be finite
+        assert_eq!(
+            dayofyr2utc(2024, f64::NAN),
+            Err(DateError::InvalidDayOfYear)
+        );
+        assert_eq!(
+            dayofyr2utc(2024, f64::INFINITY),
+            Err(DateError::InvalidDayOfYear)
+        );
+    }
+
+    /// Convert known UTC datetimes to Julian dates
+    ///
+    /// Covers a 20th century date, a 21st century date, the year 2000, a date
+    /// before Gregorian adoption, and a non-UTC timezone.
+    ///
+    /// # Panics
+    /// * If a conversion misses the expected Julian date or the expected error
     #[test]
     fn test_utc2jday() {
         // Make a test date in 20th century
@@ -555,6 +778,13 @@ mod tests {
         assert_eq!(result.unwrap_err(), DateError::DateNotUTC);
     }
 
+    /// Convert known UTC datetimes to Modified Julian dates
+    ///
+    /// Covers a 20th century date, a 21st century date, the year 2000, a date
+    /// before Gregorian adoption, and a non-UTC timezone.
+    ///
+    /// # Panics
+    /// * If a conversion misses the expected Modified Julian date or the expected error
     #[test]
     fn test_utc2mjday() {
         // Make a test date in 20th century
@@ -653,6 +883,12 @@ mod tests {
         assert_eq!(result.unwrap_err(), DateError::DateNotUTC);
     }
 
+    /// Convert a year and day-of-year into a UTC datetime
+    ///
+    /// Checks a fractional day, a time near the next year, and day 366 of a leap year.
+    ///
+    /// # Panics
+    /// * If a converted calendar field is wrong
     #[test]
     fn test_dayofyr_rounding() {
         // Test date in 20th century - Day 100.5 of 1959 (April 10, 1959 at 12:00:00)

@@ -24,7 +24,7 @@ use csv::{ReaderBuilder, WriterBuilder};
 // Internal Libraries
 // ------------------
 use crate::sgp4::{Sgp4, Sgp4Error, init_sgp4};
-use crate::time::{DateTime, Timezone, dayofyr2utc};
+use crate::time::{DateTime, Timezone, dayofyr2utc, validate_datetime};
 
 // -------
 // Structs
@@ -106,6 +106,9 @@ pub struct GenPerturbElementSet {
 
     /// Revolution number at epoch \[revs\]
     pub revolution_number_at_epoch: i64,
+
+    /// TLE checksum result
+    pub tle_checksum_valid: Option<bool>,
 }
 
 // -----
@@ -317,8 +320,8 @@ const OMM_CSV_HEADERS: [&str; 17] = [
 ///
 /// # Errors
 /// * [`GpError::InvalidTleLine0`] - If the optional name line is empty or longer than 24 characters
-/// * [`GpError::InvalidTleLine1`] - If line 1 is not 69 characters or a field cannot be parsed
-/// * [`GpError::InvalidTleLine2`] - If line 2 is not 69 characters or a field cannot be parsed
+/// * [`GpError::InvalidTleLine1`] - If line 1 is not 69 ASCII characters, does not start with `1 `, or a field cannot be parsed
+/// * [`GpError::InvalidTleLine2`] - If line 2 is not 69 ASCII characters, does not start with `2 `, or a field cannot be parsed
 /// * [`GpError::InvalidTleEpoch`] - If the epoch cannot be converted to a UTC datetime
 /// * [`GpError::MismatchedTleCatalog`] - If line 1 and line 2 have different NORAD catalog numbers
 /// * [`GpError::Sgp4`] - If SGP4 initialization fails
@@ -354,20 +357,19 @@ pub fn from_tle_lines(line1: &str, line2: &str, line0: Option<&str>) -> Result<S
         gp.common_name = name_line.to_string();
     }
 
-    // Line 1 must be 69 characters before field slices or checksum
-    if line1.len() != 69 {
+    // Line 1 must be 69 ASCII characters, starting with '1 ', before field slices or checksum
+    if line1.len() != 69 || !line1.is_ascii() || !line1.starts_with("1 ") {
         return Err(GpError::InvalidTleLine1);
     }
 
-    // Line 2 must be 69 characters before field slices or checksum
-    if line2.len() != 69 {
+    // Line 2 must be 69 ASCII characters, starting with '2 ', before field slices or checksum
+    if line2.len() != 69 || !line2.is_ascii() || !line2.starts_with("2 ") {
         return Err(GpError::InvalidTleLine2);
     }
 
-    // Validate the TLE checksum. A mismatch is a warning, not an error.
-    if !tle_checksum(line1) || !tle_checksum(line2) {
-        eprintln!("warning: TLE checksum failed; continuing with parse");
-    }
+    // Validate the TLE checksum. A mismatch is a warning, not an error, and is reported
+    // through `tle_checksum_valid`
+    gp.tle_checksum_valid = Some(tle_checksum(line1) && tle_checksum(line2));
 
     // Satellite catalog number from line 1
     gp.satellite_catalog_number =
@@ -1656,6 +1658,7 @@ where
         mean_anomaly: omm_typed_value(lookup("MEAN_ANOMALY"), "MEAN_ANOMALY")?,
         mean_motion: omm_typed_value(lookup("MEAN_MOTION"), "MEAN_MOTION")?,
         revolution_number_at_epoch: omm_typed_value(lookup("REV_AT_EPOCH"), "REV_AT_EPOCH")?,
+        tle_checksum_valid: None,
     };
 
     // Initialize the SGP4 parameters
@@ -3376,7 +3379,7 @@ fn parse_omm_epoch(epoch: &str) -> Result<DateTime, GpError> {
         .parse::<f64>()
         .map_err(|_| GpError::InvalidOmmEpoch)?;
 
-    Ok(DateTime {
+    let datetime = DateTime {
         year,
         month,
         day,
@@ -3384,7 +3387,12 @@ fn parse_omm_epoch(epoch: &str) -> Result<DateTime, GpError> {
         minute,
         second,
         timezone: Timezone::UTC,
-    })
+    };
+
+    // Reject out-of-range calendar or clock fields (e.g. month 13 or hour 25)
+    validate_datetime(&datetime).map_err(|_| GpError::InvalidOmmEpoch)?;
+
+    Ok(datetime)
 }
 
 // ----------
@@ -3397,6 +3405,10 @@ mod tests {
     use std::collections::HashMap;
     use toml::from_str;
 
+    /// Reject a TLE whose two data lines name different catalog numbers
+    ///
+    /// # Panics
+    /// * If parsing returns anything other than a catalog mismatch
     #[test]
     fn test_tle_catalog_mismatch() {
         let line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
@@ -3408,6 +3420,10 @@ mod tests {
         assert_eq!(err, GpError::MismatchedTleCatalog);
     }
 
+    /// Reject a TLE path that cannot be read
+    ///
+    /// # Panics
+    /// * If the missing file returns anything other than an I/O error
     #[test]
     fn test_tle_file_io_error() {
         let err = match from_tle_file("test/this_tle_file_does_not_exist.txt") {
@@ -3417,6 +3433,10 @@ mod tests {
         assert!(matches!(err, GpError::Io(_)));
     }
 
+    /// Reject catalog numbers outside the TLE range
+    ///
+    /// # Panics
+    /// * If a negative number or 340000 is accepted
     #[test]
     fn test_invalid_tle_catalog_number() {
         let err = match format_tle_catalog_number(-1) {
@@ -3432,6 +3452,10 @@ mod tests {
         assert_eq!(err, GpError::InvalidTLECatalogNumber);
     }
 
+    /// Reject TLE epochs outside 1957 through 2056
+    ///
+    /// # Panics
+    /// * If 1956 or 2057 is accepted
     #[test]
     fn test_invalid_tle_datetime() {
         let mut epoch = DateTime {
@@ -3457,6 +3481,10 @@ mod tests {
         assert_eq!(err, GpError::InvalidTLEDateTime);
     }
 
+    /// Reject a TLE data line that is too short for a checksum
+    ///
+    /// # Panics
+    /// * If the short line is accepted
     #[test]
     fn test_invalid_tle_line() {
         let err = match tle_line_with_checksum("1 25544U") {
@@ -3466,6 +3494,13 @@ mod tests {
         assert_eq!(err, GpError::InvalidTLELine);
     }
 
+    /// Check TLE international designator length limits
+    ///
+    /// Launch numbers and piece designators that do not fit the TLE columns are
+    /// rejected. Designators that fit are formatted into the eight-character field.
+    ///
+    /// # Panics
+    /// * If an overlong designator is accepted or a fitting one is formatted wrong
     #[test]
     fn test_invalid_tle_international_designator() {
         let err = match format_tle_intl_des("2026-1234A") {
@@ -3485,6 +3520,10 @@ mod tests {
         assert_eq!(format_tle_intl_des("2025-001ABC").unwrap(), "25001ABC");
     }
 
+    /// Reject OMM fields that are not the expected type
+    ///
+    /// # Panics
+    /// * If a non-numeric mean motion or catalog id is accepted
     #[test]
     fn test_invalid_omm_field() {
         let err = match from_omm_kvn_string("MEAN_MOTION = not_a_number") {
@@ -3500,6 +3539,10 @@ mod tests {
         assert_eq!(err, GpError::InvalidOmmField);
     }
 
+    /// Reject OMM epochs that are not a full UTC timestamp
+    ///
+    /// # Panics
+    /// * If a non-date, a date without a time, or a bad clock time is accepted
     #[test]
     fn test_invalid_omm_epoch() {
         let err = match from_omm_kvn_string("EPOCH = not-an-epoch") {
@@ -3519,8 +3562,28 @@ mod tests {
             Ok(_) => panic!("expected InvalidOmmEpoch"),
         };
         assert_eq!(err, GpError::InvalidOmmEpoch);
+
+        // Out-of-range calendar and clock fields
+        for epoch in [
+            "2026-13-01T00:00:00",
+            "2026-02-29T00:00:00",
+            "2026-06-31T00:00:00",
+            "2026-06-14T24:00:00",
+            "2026-06-14T00:60:00",
+            "2026-06-14T00:00:61.0",
+        ] {
+            let err = match from_omm_kvn_string(&format!("EPOCH = {epoch}\nMEAN_MOTION = 15.0")) {
+                Err(err) => err,
+                Ok(_) => panic!("expected InvalidOmmEpoch for {epoch}"),
+            };
+            assert_eq!(err, GpError::InvalidOmmEpoch, "{epoch}");
+        }
     }
 
+    /// Reject OMM XML that is not a document
+    ///
+    /// # Panics
+    /// * If the bad text is accepted
     #[cfg(feature = "xml")]
     #[test]
     fn test_invalid_omm_xml() {
@@ -3531,6 +3594,10 @@ mod tests {
         assert_eq!(err, GpError::InvalidOmmXml);
     }
 
+    /// Reject OMM JSON that is not an object or an array of objects
+    ///
+    /// # Panics
+    /// * If invalid JSON, a number, or an array of numbers is accepted
     #[cfg(feature = "json")]
     #[test]
     fn test_invalid_omm_json() {
@@ -3553,6 +3620,10 @@ mod tests {
         assert_eq!(err, GpError::InvalidOmmJson);
     }
 
+    /// Reject OMM CSV whose rows do not match the header
+    ///
+    /// # Panics
+    /// * If the short row is accepted
     #[cfg(feature = "csv")]
     #[test]
     fn test_invalid_omm_csv() {
@@ -3563,6 +3634,10 @@ mod tests {
         assert_eq!(err, GpError::InvalidOmmCsv);
     }
 
+    /// Reject an OMM path that cannot be read
+    ///
+    /// # Panics
+    /// * If the missing file returns anything other than an I/O error
     #[test]
     fn test_omm_file_io_error() {
         let err = match from_omm_kvn_file("test/this_omm_file_does_not_exist.txt") {
@@ -3572,6 +3647,10 @@ mod tests {
         assert!(matches!(err, GpError::Io(_)));
     }
 
+    /// Expand a two-digit TLE year into 1957 through 2056
+    ///
+    /// # Panics
+    /// * If a year maps to the wrong century
     #[test]
     fn test_tle_full_year() {
         assert_eq!(tle_full_year(0), 2000);
@@ -3582,6 +3661,12 @@ mod tests {
         assert_eq!(tle_full_year(99), 1999);
     }
 
+    /// Convert between Alpha-5 digits and their numeric values
+    ///
+    /// Letters I and O are skipped. Values outside 10 through 33 have no letter.
+    ///
+    /// # Panics
+    /// * If a letter or value maps to the wrong digit
     #[test]
     fn test_alpha5_digit() {
         assert_eq!(alpha5_digit('A'), Some(10));
@@ -3605,6 +3690,10 @@ mod tests {
         assert_eq!(alpha5_letter(34), None);
     }
 
+    /// Compute the checksum of a known TLE line
+    ///
+    /// # Panics
+    /// * If the checksum is not 1
     #[test]
     fn test_checksum_calculation() {
         // Define the TLE line
@@ -3617,6 +3706,10 @@ mod tests {
         assert_eq!(checksum, 1);
     }
 
+    /// Accept a TLE line with the right checksum and reject a wrong one
+    ///
+    /// # Panics
+    /// * If the valid line fails or the altered line passes
     #[test]
     fn test_checksum_comparison() {
         // Define the TLE line
@@ -3630,6 +3723,68 @@ mod tests {
         // Assert the checksum is correct
         assert!(checksum);
         assert!(!checksum2);
+    }
+
+    /// Report a TLE checksum mismatch as a warning, not an error
+    ///
+    /// # Panics
+    /// * If a bad checksum fails the parse or is not flagged, or a good one is flagged
+    #[test]
+    fn test_tle_checksum_warning() {
+        let line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
+        let line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+        let bad_line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2922";
+
+        let sgp4 = from_tle_lines(line1, line2, None).expect("valid TLE should parse");
+        assert_eq!(sgp4.gp.tle_checksum_valid, Some(true));
+
+        let sgp4 = from_tle_lines(bad_line1, line2, None).expect("bad checksum should still parse");
+        assert_eq!(sgp4.gp.tle_checksum_valid, Some(false));
+    }
+
+    /// Reject TLE data lines with the wrong line number or non-ASCII characters
+    ///
+    /// # Panics
+    /// * If a bad line is accepted or slicing a non-ASCII line panics
+    #[test]
+    fn test_invalid_tle_line_prefix_and_ascii() {
+        let line1 = "1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921";
+        let line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+
+        // Wrong line number digits, swapped lines, and a missing separator space
+        let bad_line1 = line1.replacen('1', "3", 1);
+        let bad_line2 = line2.replacen('2', "3", 1);
+        let no_space_line1 = format!("10{}", &line1[2..]);
+        assert!(matches!(
+            from_tle_lines(&bad_line1, line2, None),
+            Err(GpError::InvalidTleLine1)
+        ));
+        assert!(matches!(
+            from_tle_lines(line1, &bad_line2, None),
+            Err(GpError::InvalidTleLine2)
+        ));
+        assert!(matches!(
+            from_tle_lines(line2, line1, None),
+            Err(GpError::InvalidTleLine1)
+        ));
+        assert!(matches!(
+            from_tle_lines(&no_space_line1, line2, None),
+            Err(GpError::InvalidTleLine1)
+        ));
+
+        // 69-byte lines with a multibyte character across a field boundary
+        let utf8_line1 = format!("{}\u{e9}{}", &line1[..62], &line1[64..]);
+        let utf8_line2 = format!("{}\u{e9}{}", &line2[..15], &line2[17..]);
+        assert_eq!(utf8_line1.len(), 69);
+        assert_eq!(utf8_line2.len(), 69);
+        assert!(matches!(
+            from_tle_lines(&utf8_line1, line2, None),
+            Err(GpError::InvalidTleLine1)
+        ));
+        assert!(matches!(
+            from_tle_lines(line1, &utf8_line2, None),
+            Err(GpError::InvalidTleLine2)
+        ));
     }
 
     // -------------------------------------------------------
@@ -3696,8 +3851,21 @@ mod tests {
         revolution_number_at_epoch: i64,
     }
 
+    // Absolute tolerance for parsed GP numeric fields.
     const TLE_PARSE_TOL: f64 = 1e-9;
 
+    /// Compare one parsed numeric field with its expected value
+    ///
+    /// # Arguments
+    /// * `key` - TOML case key, included in the failure message
+    /// * `name` - Case description, included in the failure message
+    /// * `source` - Parser that produced the value, included in the failure message
+    /// * `label` - Field name, included in the failure message
+    /// * `value` - Parsed number
+    /// * `expected` - Number stored in the test case
+    ///
+    /// # Panics
+    /// * If the absolute difference is at least the parse tolerance
     fn assert_near(key: &str, name: &str, source: &str, label: &str, value: f64, expected: f64) {
         assert!(
             (value - expected).abs() < TLE_PARSE_TOL,
@@ -3705,6 +3873,17 @@ mod tests {
         );
     }
 
+    /// Compare a parsed element set with one TOML case
+    ///
+    /// # Arguments
+    /// * `key` - TOML case key, included in the failure message
+    /// * `name` - Case description, included in the failure message
+    /// * `source` - Parser that produced the element set
+    /// * `gp` - Parsed element set
+    /// * `case` - Expected fields
+    ///
+    /// # Panics
+    /// * If any field differs from the case
     fn assert_gp_matches(
         key: &str,
         name: &str,
@@ -3836,6 +4015,14 @@ mod tests {
         );
     }
 
+    /// Parse one TLE case, with or without a name line
+    ///
+    /// # Arguments
+    /// * `tle` - TLE text from the test case
+    ///
+    /// # Returns
+    /// * `Ok(Sgp4)` - Parsed propagator
+    /// * `Err(GpError)` - If the TLE is invalid
     fn sgp4_from_case_tle(tle: &str) -> Result<Sgp4, GpError> {
         let lines: Vec<&str> = tle
             .lines()
@@ -3849,6 +4036,13 @@ mod tests {
         }
     }
 
+    /// Compare TLE parsing with the TOML cases and the fixture file
+    ///
+    /// Exception cases must fail. The other cases must match from lines, from a
+    /// string, and from the fixture file.
+    ///
+    /// # Panics
+    /// * If a case fails to parse or a field misses the expected value
     #[test]
     fn test_tle_parsing_cases() {
         let content = std::fs::read_to_string("test/tle_parsing_cases.toml")
@@ -3917,18 +4111,42 @@ mod tests {
         }
     }
 
+    /// Load the OMM parsing cases from TOML
+    ///
+    /// # Returns
+    /// * `ParsingCases` - Parsed case file
+    ///
+    /// # Panics
+    /// * If the file cannot be read or parsed
     fn load_omm_parsing_cases() -> ParsingCases {
         let content = std::fs::read_to_string("test/omm_parsing_cases.toml")
             .expect("could not read test/omm_parsing_cases.toml");
         from_str(&content).expect("could not parse test/omm_parsing_cases.toml")
     }
 
+    /// Return OMM case keys in a stable order
+    ///
+    /// # Arguments
+    /// * `cases` - Parsed OMM case file
+    ///
+    /// # Returns
+    /// * `Vec<&String>` - Sorted case keys
     fn sorted_omm_keys(cases: &ParsingCases) -> Vec<&String> {
         let mut keys: Vec<&String> = cases.test.keys().collect();
         keys.sort();
         keys
     }
 
+    /// Compare an OMM fixture parse with the non-error TOML cases
+    ///
+    /// # Arguments
+    /// * `cases` - Parsed OMM case file
+    /// * `from_file` - Propagators parsed from the fixture
+    /// * `source` - Parser name, included in failure messages
+    /// * `fixture` - Fixture file name, included in failure messages
+    ///
+    /// # Panics
+    /// * If the record count differs or a catalog number is missing or mismatched
     #[cfg(any(feature = "xml", feature = "json", feature = "csv"))]
     fn assert_omm_file_matches_cases(
         cases: &ParsingCases,
@@ -3962,6 +4180,14 @@ mod tests {
         }
     }
 
+    /// Parse one KVN OMM case into a propagator
+    ///
+    /// # Arguments
+    /// * `omm_kvn` - KVN text from the test case
+    ///
+    /// # Returns
+    /// * `Ok(Sgp4)` - Parsed propagator
+    /// * `Err(GpError)` - If the OMM is invalid
     fn sgp4_from_case_omm(omm_kvn: &str) -> Result<Sgp4, GpError> {
         let lines: Vec<&str> = omm_kvn
             .lines()
@@ -3971,6 +4197,13 @@ mod tests {
         from_omm_kvn_lines(&lines)
     }
 
+    /// Compare KVN OMM parsing with the TOML cases and the fixture file
+    ///
+    /// Exception cases must fail. The other cases must match from lines, from a
+    /// string, and from the fixture file.
+    ///
+    /// # Panics
+    /// * If a case fails to parse or a field misses the expected value
     #[test]
     fn test_omm_kvn_parsing_cases() {
         let cases = load_omm_parsing_cases();
@@ -4041,6 +4274,10 @@ mod tests {
         }
     }
 
+    /// Compare XML OMM parsing with the TOML cases and the fixture file
+    ///
+    /// # Panics
+    /// * If the fixture fails to parse or a field misses the expected value
     #[cfg(feature = "xml")]
     #[test]
     fn test_omm_xml_parsing_cases() {
@@ -4055,6 +4292,10 @@ mod tests {
         );
     }
 
+    /// Compare JSON OMM parsing with the TOML cases and the fixture file
+    ///
+    /// # Panics
+    /// * If the fixture fails to parse or a field misses the expected value
     #[cfg(feature = "json")]
     #[test]
     fn test_omm_json_parsing_cases() {
@@ -4069,6 +4310,10 @@ mod tests {
         );
     }
 
+    /// Compare CSV OMM parsing with the TOML cases and the fixture file
+    ///
+    /// # Panics
+    /// * If the fixture fails to parse or a field misses the expected value
     #[cfg(feature = "csv")]
     #[test]
     fn test_omm_csv_parsing_cases() {
@@ -4083,6 +4328,15 @@ mod tests {
         );
     }
 
+    /// Compare two element sets field by field
+    ///
+    /// # Arguments
+    /// * `label` - Record label, included in the failure message
+    /// * `original` - Element set before export
+    /// * `exported` - Element set parsed from the export
+    ///
+    /// # Panics
+    /// * If any field differs
     fn assert_gp_eq(label: &str, original: &GenPerturbElementSet, exported: &GenPerturbElementSet) {
         assert_eq!(
             original.common_name, exported.common_name,
@@ -4183,6 +4437,16 @@ mod tests {
         );
     }
 
+    /// Create the export directory and return a path inside it
+    ///
+    /// # Arguments
+    /// * `file_name` - File name under test/export
+    ///
+    /// # Returns
+    /// * `String` - Path of the export file
+    ///
+    /// # Panics
+    /// * If the directory cannot be created or the path is not valid UTF-8
     fn export_test_path(file_name: &str) -> String {
         let dir = std::path::Path::new("test/export");
         std::fs::create_dir_all(dir).expect("could not create test/export");
@@ -4192,6 +4456,10 @@ mod tests {
             .to_string()
     }
 
+    /// Export no propagators as an empty KVN string
+    ///
+    /// # Panics
+    /// * If the export is not empty
     #[test]
     fn test_omm_kvn_export_empty() {
         // An empty slice should produce an empty KVN string
@@ -4199,6 +4467,10 @@ mod tests {
         assert_eq!(exported, "");
     }
 
+    /// Export KVN text and parse it back to the same element sets
+    ///
+    /// # Panics
+    /// * If a record count or field differs
     #[test]
     fn test_omm_kvn_export_string_roundtrip() {
         // Parse the KVN test file, export, and parse the export
@@ -4213,6 +4485,10 @@ mod tests {
         }
     }
 
+    /// Write KVN to a file and parse it back to the same element sets
+    ///
+    /// # Panics
+    /// * If the file cannot be written or a field differs
     #[test]
     fn test_omm_kvn_export_file_roundtrip() {
         // Parse the KVN test file and write it back out
@@ -4230,6 +4506,10 @@ mod tests {
         }
     }
 
+    /// Export no propagators as an XML document with no OMM records
+    ///
+    /// # Panics
+    /// * If the exported document parses as a non-empty list
     #[cfg(feature = "xml")]
     #[test]
     fn test_omm_xml_export_empty() {
@@ -4239,6 +4519,10 @@ mod tests {
         assert!(reparsed.is_empty());
     }
 
+    /// Export XML text and parse it back to the same element sets
+    ///
+    /// # Panics
+    /// * If a record count or field differs
     #[cfg(feature = "xml")]
     #[test]
     fn test_omm_xml_export_string_roundtrip() {
@@ -4254,6 +4538,10 @@ mod tests {
         }
     }
 
+    /// Write XML to a file and parse it back to the same element sets
+    ///
+    /// # Panics
+    /// * If the file cannot be written or a field differs
     #[cfg(feature = "xml")]
     #[test]
     fn test_omm_xml_export_file_roundtrip() {
@@ -4272,6 +4560,10 @@ mod tests {
         }
     }
 
+    /// Export no propagators as an empty JSON array
+    ///
+    /// # Panics
+    /// * If the exported array parses as a non-empty list
     #[cfg(feature = "json")]
     #[test]
     fn test_omm_json_export_empty() {
@@ -4281,6 +4573,10 @@ mod tests {
         assert!(reparsed.is_empty());
     }
 
+    /// Export JSON text and parse it back to the same element sets
+    ///
+    /// # Panics
+    /// * If a record count or field differs
     #[cfg(feature = "json")]
     #[test]
     fn test_omm_json_export_string_roundtrip() {
@@ -4296,6 +4592,10 @@ mod tests {
         }
     }
 
+    /// Write JSON to a file and parse it back to the same element sets
+    ///
+    /// # Panics
+    /// * If the file cannot be written or a field differs
     #[cfg(feature = "json")]
     #[test]
     fn test_omm_json_export_file_roundtrip() {
@@ -4314,6 +4614,10 @@ mod tests {
         }
     }
 
+    /// Export no propagators as a header-only CSV
+    ///
+    /// # Panics
+    /// * If the exported CSV parses as a non-empty list
     #[cfg(feature = "csv")]
     #[test]
     fn test_omm_csv_export_empty() {
@@ -4323,6 +4627,10 @@ mod tests {
         assert!(reparsed.is_empty());
     }
 
+    /// Export CSV text and parse it back to the same element sets
+    ///
+    /// # Panics
+    /// * If a record count or field differs
     #[cfg(feature = "csv")]
     #[test]
     fn test_omm_csv_export_string_roundtrip() {
@@ -4338,6 +4646,10 @@ mod tests {
         }
     }
 
+    /// Write CSV to a file and parse it back to the same element sets
+    ///
+    /// # Panics
+    /// * If the file cannot be written or a field differs
     #[cfg(feature = "csv")]
     #[test]
     fn test_omm_csv_export_file_roundtrip() {
@@ -4356,6 +4668,10 @@ mod tests {
         }
     }
 
+    /// Export no propagators as an empty TLE string
+    ///
+    /// # Panics
+    /// * If the export fails or is not empty
     #[test]
     fn test_tle_export_empty() {
         // An empty slice should produce an empty TLE string
@@ -4363,6 +4679,10 @@ mod tests {
         assert_eq!(exported, "");
     }
 
+    /// Export TLE text and parse it back to the same element sets
+    ///
+    /// # Panics
+    /// * If a record count or field differs
     #[test]
     fn test_tle_export_string_roundtrip() {
         // Parse the TLE test file, export, and parse the export
@@ -4377,6 +4697,10 @@ mod tests {
         }
     }
 
+    /// Write a TLE file and parse it back to the same element sets
+    ///
+    /// # Panics
+    /// * If the file cannot be written or a field differs
     #[test]
     fn test_tle_export_file_roundtrip() {
         // Parse the TLE test file and write it back out
@@ -4394,6 +4718,13 @@ mod tests {
         }
     }
 
+    /// Check exported TLE line length, checksum, and name length
+    ///
+    /// Data lines must be 69 characters and pass the checksum. Name lines must be
+    /// non-empty and at most 24 characters.
+    ///
+    /// # Panics
+    /// * If a line has the wrong length or a bad checksum
     #[test]
     fn test_tle_export_line_format() {
         // Exported data lines must be 69 characters and pass the checksum
@@ -4411,6 +4742,12 @@ mod tests {
         }
     }
 
+    /// Use type defaults when a KVN field is missing
+    ///
+    /// Numbers default to 0, strings to empty, and classification to U.
+    ///
+    /// # Panics
+    /// * If a missing field returns another default
     #[test]
     fn test_kvn_parse_defaults() {
         // Define an empty OMM record

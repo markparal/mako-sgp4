@@ -17,11 +17,11 @@ The name mako-sgp4 pays tribute to the Shortfin Mako Shark, the fastest shark sp
 
 The SGP4 propagator is a mean orbital elements propagator. At any point in time, its accuracy to the true position of an orbiting body is typically on the order of hundreds of meters to kilometers. Thus, it is not intended for high-precision operations.
 
-mako-sgp4 is verified against the standard Vallado test cases (found in `test/`). In all cases, it agrees with Vallado's SGP4 propagator to within 1 meter.
+mako-sgp4 is verified against the standard Vallado test cases and additional test cases generated with [python-sgp4](https://github.com/brandon-rhodes/python-sgp4) (found in `test/`). In all propagation cases, mako-sgp4 agrees with both reference implementations to within 1 millimeter in position and 1 millimeter per second in velocity, per component. This is agreement with the reference SGP4 implementations, not with the true orbit.
 
 ## Documentation
 
-The full API is on [docs.rs](https://docs.rs/mako-sgp4). The crate requires Rust 1.85 or newer (`edition = "2024"`). The style guide and math spec live in the `docs/` directory.
+The full API is on [docs.rs](https://docs.rs/mako-sgp4). The crate requires Rust 1.85 or newer (`edition = "2024"`). The [math specification](docs/mathspec.md) documents every equation the crate implements, with references to the source code, and the [style guide](docs/styleguide.md) covers contribution conventions.
 
 ```bash
 # Unit tests, doctests, and default features (XML / JSON / CSV)
@@ -103,8 +103,6 @@ cargo add mako-sgp4 --no-default-features --features json,csv # Exclude XML
 ```
 
 ## Future Work
-- Add additional test cases
-- Finish math spec
 - Fit state data to GP
 - Python wrapper
 
@@ -115,3 +113,4 @@ cargo add mako-sgp4 --no-default-features --features json,csv # Exclude XML
 - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
 - [Space-Track](https://www.space-track.org/auth/login)
 - [Celestrak](https://celestrak.org/)
+- [python-sgp4](https://github.com/brandon-rhodes/python-sgp4)

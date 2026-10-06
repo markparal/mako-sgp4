@@ -1,6 +1,6 @@
 [package]
 name = "mako-sgp4"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.85"
 authors = [
@@ -28,8 +28,8 @@ include = [
     "/src",
     "/examples",
     "Cargo.toml",
-    "README.md",
-    "LICENSE*",
+    "/README.md",
+    "/LICENSE*",
 ]
 
 [lib]
