@@ -357,7 +357,7 @@ At a high level, the initialization process can be broken into a series of steps
 ### 6.1 Recover Brouwer Mean Elements
 Implemented in `init_sgp4` (`src/sgp4.rs`), stored in `Sgp4.brouwer0`.
 
-We will define the Brouwer mean element set with Table 6 below.
+The Brouwer mean element set is defined in Table 6 below.
 
 <div align="center">
 
@@ -400,7 +400,7 @@ $$
 n_B = \frac{n_K}{1 + \delta_0} \qquad (6.1.5)
 $$
 
-With the Brouwer mean motion, extract the semi-major axis and orbital period as well with Eqs. (6.1.6)–(6.1.7).
+The semi-major axis and orbital period are then calculated from the Brouwer mean motion with Eqs. (6.1.6)–(6.1.7).
 
 $$
 a_B = \left(\frac{k_e}{n_B}\right)^{2/3} \qquad (6.1.6)
@@ -413,7 +413,7 @@ $$
 ### 6.2 Initialize Atmospheric Drag Parameters
 Implemented in `init_atm_effects` (`src/sgp4.rs`), stored in `Sgp4.atm_params`.
 
-We will define the atmospheric drag parameters with Table 7 below.
+The atmospheric drag parameters are defined in Table 7 below.
 
 <div align="center">
 
@@ -537,7 +537,7 @@ $$
 ### 6.3 Initialize Earth Zonal Harmonics Parameters
 Implemented in `init_zonal_effects` (`src/sgp4.rs`), stored in `Sgp4.zonal_params`.
 
-We will define the Earth zonal harmonics parameters with Table 8 below.
+The Earth zonal harmonics parameters are defined in Table 8 below.
 
 <div align="center">
 
@@ -585,7 +585,7 @@ $$
 ### 6.4 Initialize Lunar and Solar Third-Body Parameters
 Implemented in `init_lunar_solar_effects` and `calc_lunar_solar_secular_rates` (`src/sgp4.rs`), stored in `Sgp4.lunar_params` and `Sgp4.solar_params`.
 
-We will define the lunar and solar third-body parameters with Table 9 below.
+The lunar and solar third-body parameters are defined in Table 9 below.
 
 <div align="center">
 
@@ -637,7 +637,7 @@ $$
 T_B \ge 225 \text{ min} \quad \text{(deep space, } n_B \le 2\pi / 225 \approx 0.0279253 \text{ rad/min)} \qquad (6.4.1)
 $$
 
-The constants used for modeling the orbits and gravitational effects of the Sun and Moon are given in Tables B1 and B2. The time difference between the solar/lunar epoch and the GP element set epoch is defined as $\Delta t = JD_0 - t_{SM}$ in days, where $JD_0$ is the Julian date of the GP element set epoch. We calculate orbital parameters with Eqs. (6.4.2)–(6.4.11).
+The constants used for modeling the orbits and gravitational effects of the Sun and Moon are given in Tables B1 and B2. The time difference between the solar/lunar epoch and the GP element set epoch is defined as $\Delta t = JD_0 - t_{SM}$ in days, where $JD_0$ is the Julian date of the GP element set epoch. The orbital parameters are calculated with Eqs. (6.4.2)–(6.4.11).
 
 $$
 \Omega_{Me} = \left(\Omega_{Me0} + \dot{\Omega}_{Me0} \Delta t\right) \bmod 2\pi \qquad (6.4.2)
@@ -844,7 +844,7 @@ For satellites with $i_B < 3^\circ$ or $i_B > 177^\circ$, the third-body RAAN ra
 ### 6.5 Initialize Earth Half-Day and Whole-Day Resonance Effects
 Implemented in `init_earth_gravity_resonance_halfday`, `init_earth_gravity_resonance_wholeday`, and `calc_theta_g` (`src/sgp4.rs`), stored in `Sgp4.half_day_resonance_params` and `Sgp4.whole_day_resonance_params`.
 
-We will define the Earth resonance parameters with Table 10 below.
+The Earth resonance parameters are defined in Table 10 below.
 
 <div align="center">
 
@@ -1134,7 +1134,7 @@ The conversion is only valid for dates on or after October 10th, 1582, and it tr
 ### 7.2 Account for Earth Zonal Gravity and Partial Atmospheric Drag Effects
 Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
 
-We will define the Earth zonal gravity and partial atmospheric drag variables with Table 12 below. Unlike the Brouwer mean elements at epoch (subscript $B$), the elements without a subscript are functions of $t$ and are updated in place by the remaining propagation steps.
+The Earth zonal gravity and partial atmospheric drag variables are defined in Table 12 below. Unlike the Brouwer mean elements at epoch (subscript $B$), the elements without a subscript are functions of $t$ and are updated in place by the remaining propagation steps.
 
 <div align="center">
 
@@ -1198,7 +1198,7 @@ The eccentricity, inclination, and mean motion are carried forward unchanged fro
 ### 7.3 Account for Lunar and Solar Third-Body Secular Effects
 Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
 
-We will define the lunar and solar third-body secular variables with Table 13 below. These join the time-varying elements of Table 12.
+The lunar and solar third-body secular variables are defined in Table 13 below. These join the time-varying elements of Table 12.
 
 <div align="center">
 
@@ -1240,7 +1240,7 @@ The secular rates are evaluated once during initialization using the lunar and s
 ### 7.4 Account for Earth Half-Day and Whole-Day Resonance Effects
 Implemented in `sgp4_prop_delta`, `half_day_euler_maclaurin_step`, and `whole_day_euler_maclaurin_step` (`src/sgp4.rs`).
 
-We will define the Earth resonance integration variables with Table 14 below. Subscript $i$ denotes a value after $i$ integration steps from the GP element set epoch.
+The Earth resonance integration variables are defined in Table 14 below. Subscript $i$ denotes a value after $i$ integration steps from the GP element set epoch.
 
 <div align="center">
 
@@ -1396,7 +1396,7 @@ $$
 ### 7.5 Account for Remaining Atmospheric Drag Effects
 Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
 
-We will define the remaining atmospheric drag variables with Table 15 below. These join the time-varying elements of Tables 12–14.
+The remaining atmospheric drag variables are defined in Table 15 below. These join the time-varying elements of Tables 12–14.
 
 <div align="center">
 
@@ -1467,7 +1467,7 @@ $$
 ### 7.6 Recover the Mean Elements
 Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
 
-After Sections 7.2–7.5, the secular and drag effects have all been applied, and the time-varying elements form a mean element set at time $t$. We will define this mean element set with Table 16 below.
+After Sections 7.2–7.5, the secular and drag effects have all been applied, and the time-varying elements form a mean element set at time $t$. This mean element set is defined in Table 16 below.
 
 <div align="center">
 
@@ -1513,7 +1513,7 @@ The inclination, eccentricity, mean motion, and semi-major axis are not changed 
 ### 7.7 Account for Long-Period Periodic Effects of Lunar and Solar Gravity
 Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
 
-We will define the lunar and solar long-period periodic variables with Table 17 below. As in Section 6.4, subscript $X$ denotes the third body, with $X = M$ for the Moon and $X = S$ for the Sun.
+The lunar and solar long-period periodic variables are defined in Table 17 below. As in Section 6.4, subscript $X$ denotes the third body, with $X = M$ for the Moon and $X = S$ for the Sun.
 
 <div align="center">
 
@@ -1663,7 +1663,7 @@ $$
 ### 7.8 Account for Long-Period Periodic Effects of Earth's Gravity
 Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
 
-We will define the Earth long-period periodic variables with Table 18 below. From this step on, the eccentricity and argument of perigee are carried in the components $a_{xN}$ and $a_{yN}$ of the eccentricity vector, and the mean anomaly is carried in the mean longitude.
+The Earth long-period periodic variables are defined in Table 18 below. From this step on, the eccentricity and argument of perigee are carried in the components $a_{xN}$ and $a_{yN}$ of the eccentricity vector, and the mean anomaly is carried in the mean longitude.
 
 <div align="center">
 
@@ -1718,7 +1718,7 @@ $$
 ### 7.9 Solve Kepler's Equation
 Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
 
-We will define the Kepler's equation variables with Table 19 below.
+The variables for Kepler's equation are defined in Table 19 below.
 
 <div align="center">
 
@@ -1759,7 +1759,7 @@ The iteration stops when $\left|\Delta\psi\right| < 10^{-12}$ or after 10 iterat
 ### 7.10 Account for Short-Period Periodic Effects of Earth's Gravity
 Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
 
-We will define the Earth short-period periodic variables with Table 20 below. Subscript $k$ denotes a value with the short-period corrections applied.
+The Earth short-period periodic variables are defined in Table 20 below. Subscript $k$ denotes a value with the short-period corrections applied.
 
 <div align="center">
 
@@ -1894,7 +1894,7 @@ $$
 ### 7.11 Calculate Position and Velocity Vectors in the TEME Frame
 Implemented in `sgp4_prop_delta` (`src/sgp4.rs`), returned as a `StateVector`.
 
-We will define the TEME position and velocity variables with Table 21 below.
+The TEME position and velocity variables are defined in Table 21 below.
 
 <div align="center">
 
