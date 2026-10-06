@@ -28,8 +28,8 @@ include = [
     "/src",
     "/examples",
     "Cargo.toml",
-    "README.md",
-    "LICENSE*",
+    "/README.md",
+    "/LICENSE*",
 ]
 
 [lib]

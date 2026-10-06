@@ -2088,8 +2088,8 @@ Thank you!
 - [3] [Theoretical Evaluation of Atmospheric Drag Effects in the Motion of an Artificial Satellite by Brouwer et al.](https://scixplorer.org/abs/1961AJ.....66..193B/abstract)
 - [4] [An Improved Analytical Drag Theory for the Artificial Satellite Problem by Lane et al.](https://arc.aiaa.org/doi/abs/10.2514/6.1969-925)
 - [5] [Small Eccentricities or Inclinations in the Brouwer Theory of the Artificial Satellite by Lyddane](https://ui.adsabs.harvard.edu/abs/1963AJ.....68..555L/abstract)
-- [6] [General Perturbations Theories Derived from the 1965 Lane Drag Theory by Lane et al.]()
-- [7] [A First Order Semi-Analytic Perturbation Theory for Highly Eccentric 12 Hour Resonating Satellite Orbits by Bowman]()
+- [6] General Perturbations Theories Derived from the 1965 Lane Drag Theory by Lane et al.
+- [7] A First Order Semi-Analytic Perturbation Theory for Highly Eccentric 12 Hour Resonating Satellite Orbits by Bowman
 - [8] [A Restricted Four Body Solution for Resonating Satellites Without Drag by Hujsak](https://ui.adsabs.harvard.edu/abs/1979aiaa.confV....H/abstract)
 - [9] [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al.](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
 - [10] [The mako-sgp4 Github Repository by Paral](https://github.com/markparal/mako-sgp4)
