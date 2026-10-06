@@ -1663,14 +1663,285 @@ $$
 ### 7.8 Account for Long-Period Periodic Effects of Earth's Gravity
 Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
 
+We will define the Earth long-period periodic variables with Table 18 below. From this step on, the eccentricity and argument of perigee are carried in the components $a_{xN}$ and $a_{yN}$ of the eccentricity vector, and the mean anomaly is carried in the mean longitude.
+
+<div align="center">
+
+| Variable | Symbol | Units | Definition | Code |
+| --- | --- | --- | --- | --- |
+| Beta | $\beta$ | - | $\beta = \sqrt{1 - e^2}$ at time $t$ | `beta_update` |
+| Mean Longitude | $L$ | radians | $L = M + \omega + \Omega$ after Section 7.7 | `il` |
+| Long-Period Mean Longitude Correction | $L_L$ | radians | Long-period correction to the mean longitude | `ill` |
+| Long-Period Eccentricity Vector Correction | $a_{yNL}$ | - | Long-period correction to $a_{yN}$ | `aynl` |
+| Perturbed Mean Longitude | $L_T$ | radians | Mean longitude with the long-period correction | `ilt` |
+| Eccentricity Vector x-Component | $a_{xN}$ | - | $e \cos \omega$ | `axn` |
+| Eccentricity Vector y-Component | $a_{yN}$ | - | $e \sin \omega$ with the long-period correction | `ayn` |
+
+</div>
+
+<p align="center"><strong>Table 18.</strong> Earth long-period periodic variables (Code entries are local variables in <code>sgp4_prop_delta</code>)</p>
+
+The long-period periodic effects of Earth's gravity come from the $J_3$ zonal harmonic and are applied to all satellites. They use the elements at time $t$ from Sections 7.6 and 7.7, and the semi-major axis $a$ from Section 7.5. The mean longitude is given by Eq. (7.8.1).
+
+$$
+L = M + \omega + \Omega \qquad (7.8.1)
+$$
+
+$$
+\beta = \sqrt{1 - e^2} \qquad (7.8.2)
+$$
+
+The long-period corrections are given by Eqs. (7.8.3)–(7.8.4), where $A_{3,0}$ is from Eq. (6.2.5). To avoid division by zero for retrograde equatorial orbits ($i = 180^\circ$), $1 + \cos i$ in Eq. (7.8.3) is replaced with $1.5 \times 10^{-12}$ when $\left|1 + \cos i\right| < 1.5 \times 10^{-12}$, following Vallado et al. ([14]).
+
+$$
+L_L = \frac{A_{3,0} \sin i}{8 k_2 a \beta^2} \, e \cos \omega \, \frac{3 + 5 \cos i}{1 + \cos i} \qquad (7.8.3)
+$$
+
+$$
+a_{yNL} = \frac{A_{3,0} \sin i}{4 k_2 a \beta^2} \qquad (7.8.4)
+$$
+
+The perturbed mean longitude and eccentricity vector components are given by Eqs. (7.8.5)–(7.8.7).
+
+$$
+L_T = L + L_L \qquad (7.8.5)
+$$
+
+$$
+a_{xN} = e \cos \omega \qquad (7.8.6)
+$$
+
+$$
+a_{yN} = e \sin \omega + a_{yNL} \qquad (7.8.7)
+$$
+
 ### 7.9 Solve Kepler's Equation
 Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
+
+We will define the Kepler's equation variables with Table 19 below.
+
+<div align="center">
+
+| Variable | Symbol | Units | Definition | Code |
+| --- | --- | --- | --- | --- |
+| Mean Argument of Latitude | $U$ | radians | $U = M + \omega$ with the long-period correction | `u` |
+| Eccentric Argument of Latitude | $\psi$ | radians | $\psi = E + \omega$, where $E$ is the eccentric anomaly | `e_omega` |
+| Newton-Raphson Step | $\Delta\psi$ | radians | Change in $\psi$ at each iteration | `delta_e_omega` |
+
+</div>
+
+<p align="center"><strong>Table 19.</strong> Kepler's equation variables (Code entries are local variables in <code>sgp4_prop_delta</code>)</p>
+
+The mean argument of latitude is given by Eq. (7.9.1).
+
+$$
+U = \left(L_T - \Omega\right) \bmod 2\pi \qquad (7.9.1)
+$$
+
+Kepler's equation $M = E - e \sin E$ is solved in terms of $\psi = E + \omega$ and the eccentricity vector components from Section 7.8, as given by Eq. (7.9.2).
+
+$$
+U = \psi - a_{xN} \sin \psi + a_{yN} \cos \psi \qquad (7.9.2)
+$$
+
+Eq. (7.9.2) is solved for $\psi$ with Newton-Raphson iteration, starting from $\psi_0 = U$. Each step is given by Eq. (7.9.3) and is limited to $\left|\Delta\psi\right| \le 0.95$ rad, as given by Eq. (7.9.4).
+
+$$
+\Delta\psi = \frac{U - a_{yN} \cos \psi + a_{xN} \sin \psi - \psi}{1 - a_{yN} \sin \psi - a_{xN} \cos \psi} \qquad (7.9.3)
+$$
+
+$$
+\psi \mathrel{+}= \mathrm{sign}\left(\Delta\psi\right) \min\left(\left|\Delta\psi\right|, 0.95\right) \qquad (7.9.4)
+$$
+
+The iteration stops when $\left|\Delta\psi\right| < 10^{-12}$ or after 10 iterations, following Vallado et al. ([14]).
 
 ### 7.10 Account for Short-Period Periodic Effects of Earth's Gravity
 Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
 
+We will define the Earth short-period periodic variables with Table 20 below. Subscript $k$ denotes a value with the short-period corrections applied.
+
+<div align="center">
+
+| Variable | Symbol | Units | Definition | Code |
+| --- | --- | --- | --- | --- |
+| Semi-latus Rectum | $p_L$ | Earth radii | $p_L = a \left(1 - e^2\right)$ | `pl` |
+| Eccentric Anomaly Cosine | $\cos E$ | - | Cosine of the eccentric anomaly | `cos_ecc_anomaly` |
+| Eccentric Anomaly Sine | $\sin E$ | - | Sine of the eccentric anomaly | `sin_ecc_anomaly` |
+| Radius | $r$ | Earth radii | Radial distance before the short-period corrections | `r` |
+| Radial Velocity | $\dot{r}$ | Earth radii / min | Time derivative of $r$ | `r_dot` |
+| Transverse Velocity | $r \dot{f}$ | Earth radii / min | Velocity perpendicular to the radius in the orbital plane | `r_f_dot` |
+| Argument of Latitude | $u$ | radians | True anomaly plus argument of perigee | `u` |
+| Radius Correction | $\Delta r$ | Earth radii | Short-period correction to $r$ | `delta_r` |
+| Argument of Latitude Correction | $\Delta u$ | radians | Short-period correction to $u$ | `delta_u` |
+| RAAN Correction | $\Delta \Omega$ | radians | Short-period correction to $\Omega$ | `delta_raan` |
+| Inclination Correction | $\Delta i$ | radians | Short-period correction to $i$ | `delta_i` |
+| Radial Velocity Correction | $\Delta \dot{r}$ | Earth radii / min | Short-period correction to $\dot{r}$ | `delta_r_dot` |
+| Transverse Velocity Correction | $\Delta \left(r \dot{f}\right)$ | Earth radii / min | Short-period correction to $r \dot{f}$ | `delta_r_f_dot` |
+| Corrected Radius | $r_k$ | Earth radii | Radial distance with the short-period corrections | `rk` |
+| Corrected Argument of Latitude | $u_k$ | radians | Argument of latitude with the short-period corrections | `uk` |
+| Corrected RAAN | $\Omega_k$ | radians | RAAN with the short-period corrections | `raan_k` |
+| Corrected Inclination | $i_k$ | radians | Inclination with the short-period corrections | `i_k` |
+| Corrected Radial Velocity | $\dot{r}_k$ | Earth radii / min | Radial velocity with the short-period corrections | `r_dot_k` |
+| Corrected Transverse Velocity | $\left(r \dot{f}\right)_k$ | Earth radii / min | Transverse velocity with the short-period corrections | `r_f_dot_k` |
+
+</div>
+
+<p align="center"><strong>Table 20.</strong> Earth short-period periodic variables (Code entries are local variables in <code>sgp4_prop_delta</code>)</p>
+
+The eccentricity and semi-latus rectum are recovered from the eccentricity vector, as given by Eqs. (7.10.1)–(7.10.2). If $p_L < 0$, propagation is invalid.
+
+$$
+e = \sqrt{a_{xN}^2 + a_{yN}^2} \qquad (7.10.1)
+$$
+
+$$
+p_L = a \left(1 - e^2\right) \qquad (7.10.2)
+$$
+
+The eccentric anomaly is recovered from $\psi$ (Section 7.9), as given by Eqs. (7.10.3)–(7.10.4).
+
+$$
+\cos E = \frac{a_{xN} \cos \psi + a_{yN} \sin \psi}{e} \qquad (7.10.3)
+$$
+
+$$
+\sin E = \frac{a_{xN} \sin \psi - a_{yN} \cos \psi}{e} \qquad (7.10.4)
+$$
+
+The radius, radial velocity, and transverse velocity are given by Eqs. (7.10.5)–(7.10.7).
+
+$$
+r = a \left(1 - e \cos E\right) \qquad (7.10.5)
+$$
+
+$$
+\dot{r} = \frac{k_e \sqrt{a} \, e \sin E}{r} \qquad (7.10.6)
+$$
+
+$$
+r \dot{f} = \frac{k_e \sqrt{p_L}}{r} \qquad (7.10.7)
+$$
+
+The argument of latitude is given by Eqs. (7.10.8)–(7.10.10).
+
+$$
+\cos u = \frac{a}{r} \left[\cos \psi - a_{xN} + \frac{a_{yN} \, e \sin E}{1 + \sqrt{1 - e^2}}\right] \qquad (7.10.8)
+$$
+
+$$
+\sin u = \frac{a}{r} \left[\sin \psi - a_{yN} - \frac{a_{xN} \, e \sin E}{1 + \sqrt{1 - e^2}}\right] \qquad (7.10.9)
+$$
+
+$$
+u = \mathrm{atan2}\left(\sin u, \cos u\right) \qquad (7.10.10)
+$$
+
+The short-period corrections from the $J_2$ zonal harmonic are given by Eqs. (7.10.11)–(7.10.16), where $n$ is the mean motion from Section 7.5 and $i$ is the inclination after Section 7.7.
+
+$$
+\Delta r = \frac{k_2}{2 p_L} \left(1 - \cos^2 i\right) \cos 2u \qquad (7.10.11)
+$$
+
+$$
+\Delta u = -\frac{k_2}{4 p_L^2} \left(7 \cos^2 i - 1\right) \sin 2u \qquad (7.10.12)
+$$
+
+$$
+\Delta \Omega = \frac{3 k_2 \cos i}{2 p_L^2} \sin 2u \qquad (7.10.13)
+$$
+
+$$
+\Delta i = \frac{3 k_2 \cos i}{2 p_L^2} \sin i \cos 2u \qquad (7.10.14)
+$$
+
+$$
+\Delta \dot{r} = -\frac{k_2 n}{p_L} \left(1 - \cos^2 i\right) \sin 2u \qquad (7.10.15)
+$$
+
+$$
+\Delta \left(r \dot{f}\right) = \frac{k_2 n}{p_L} \left[\left(1 - \cos^2 i\right) \cos 2u - \frac{3}{2} \left(1 - 3 \cos^2 i\right)\right] \qquad (7.10.16)
+$$
+
+The corrected radius is given by Eq. (7.10.17). If $r_k < 1$ (the satellite is below the Earth's equatorial radius), the satellite has decayed and propagation is invalid.
+
+$$
+r_k = r \left[1 - \frac{3}{2} \frac{k_2 \sqrt{1 - e^2}}{p_L^2} \left(3 \cos^2 i - 1\right)\right] + \Delta r \qquad (7.10.17)
+$$
+
+The remaining corrected values are given by Eqs. (7.10.18)–(7.10.22).
+
+$$
+u_k = u + \Delta u \qquad (7.10.18)
+$$
+
+$$
+\Omega_k = \Omega + \Delta \Omega \qquad (7.10.19)
+$$
+
+$$
+i_k = i + \Delta i \qquad (7.10.20)
+$$
+
+$$
+\dot{r}_k = \dot{r} + \Delta \dot{r} \qquad (7.10.21)
+$$
+
+$$
+\left(r \dot{f}\right)_k = r \dot{f} + \Delta \left(r \dot{f}\right) \qquad (7.10.22)
+$$
+
 ### 7.11 Calculate Position and Velocity Vectors in the TEME Frame
-Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
+Implemented in `sgp4_prop_delta` (`src/sgp4.rs`), returned as a `StateVector`.
+
+We will define the TEME position and velocity variables with Table 21 below.
+
+<div align="center">
+
+| Variable | Symbol | Units | Definition | Code |
+| --- | --- | --- | --- | --- |
+| In-Plane Node Normal Vector | $\vec{M}$ | - | Unit vector in the orbital plane, $90^\circ$ ahead of the ascending node | `mx`, `my`, `mz` |
+| Node Vector | $\vec{N}$ | - | Unit vector toward the ascending node | `nx`, `ny`, `nz` |
+| Radial Unit Vector | $\vec{U}$ | - | Unit vector toward the satellite | `ux`, `uy`, `uz` |
+| Transverse Unit Vector | $\vec{V}$ | - | Unit vector perpendicular to $\vec{U}$ in the orbital plane, in the direction of motion | `vx`, `vy`, `vz` |
+| Position | $\vec{r}$ | km | Position in the TEME frame | `rx`, `ry`, `rz` |
+| Velocity | $\vec{v}$ | km/s | Velocity in the TEME frame | `r_dot_x`, `r_dot_y`, `r_dot_z` |
+
+</div>
+
+<p align="center"><strong>Table 21.</strong> TEME position and velocity variables (Code entries are local variables in <code>sgp4_prop_delta</code>)</p>
+
+The orientation of the orbital plane is given by the unit vectors in Eqs. (7.11.1)–(7.11.2), using the corrected RAAN and inclination from Section 7.10.
+
+$$
+\vec{M} = \begin{bmatrix} -\sin \Omega_k \cos i_k \\ \cos \Omega_k \cos i_k \\ \sin i_k \end{bmatrix} \qquad (7.11.1)
+$$
+
+$$
+\vec{N} = \begin{bmatrix} \cos \Omega_k \\ \sin \Omega_k \\ 0 \end{bmatrix} \qquad (7.11.2)
+$$
+
+The radial and transverse unit vectors are given by Eqs. (7.11.3)–(7.11.4).
+
+$$
+\vec{U} = \vec{M} \sin u_k + \vec{N} \cos u_k \qquad (7.11.3)
+$$
+
+$$
+\vec{V} = \vec{M} \cos u_k - \vec{N} \sin u_k \qquad (7.11.4)
+$$
+
+The position and velocity in the TEME frame are given by Eqs. (7.11.5)–(7.11.6). The factors of $R_e$ and $R_e / 60$ convert from Earth radii and Earth radii/min to the output units of km and km/s (Table 4).
+
+$$
+\vec{r} = R_e \, r_k \, \vec{U} \qquad (7.11.5)
+$$
+
+$$
+\vec{v} = \frac{R_e}{60} \left[\dot{r}_k \, \vec{U} + \left(r \dot{f}\right)_k \vec{V}\right] \qquad (7.11.6)
+$$
+
+If any component of $\vec{r}$ or $\vec{v}$ is not finite, propagation is invalid.
 
 ## 8. Verification
 mako-sgp4 is verified by two reference test suites in the `test/` directory, run by `cargo test`. Each reference state is propagated through both `sgp4_prop_delta` (minutes since epoch) and `sgp4_prop_datetime` (UTC datetime). Each position and velocity component of the state must agree with the reference to within $10^{-6}$ km and $10^{-6}$ km/s (1 mm and 1 mm/s).
@@ -1684,7 +1955,7 @@ mako-sgp4 is verified by two reference test suites in the `test/` directory, run
 
 </div>
 
-<p align="center"><strong>Table 18.</strong> Verification test suites</p>
+<p align="center"><strong>Table 22.</strong> Verification test suites</p>
 
 ## Appendix A: World Geodetic System (WGS) Models
 
