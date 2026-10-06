@@ -679,7 +679,167 @@ $$
 M_S = \left(M_{S0} + \dot{M}_{S0} \Delta t\right) \bmod 2\pi \qquad (6.4.11)
 $$
 
-For satellites with $i_B < 3^\circ$ or $i_B > 177^\circ$, the third-body RAAN rates $\dot{\Omega}_X$ are set to zero to avoid the division by $\sin i_B$, and the corresponding $\cos i_B$ correction to the argument of perigee rates $\dot{\omega}_X$ is omitted. The retrograde bound follows Vallado et al. ([14]).
+The difference between the satellite and third-body RAAN is given by Eq. (6.4.12).
+
+$$
+\Delta\Omega_X = \Omega_B - \Omega_X \qquad (6.4.12)
+$$
+
+The intermediate coefficients $a_{k,X}$ are given by Eqs. (6.4.13)–(6.4.22).
+
+$$
+a_{1,X} = \cos \omega_X \cos \Delta\Omega_X + \sin \omega_X \cos i_X \sin \Delta\Omega_X \qquad (6.4.13)
+$$
+
+$$
+a_{3,X} = -\sin \omega_X \cos \Delta\Omega_X + \cos \omega_X \cos i_X \sin \Delta\Omega_X \qquad (6.4.14)
+$$
+
+$$
+a_{7,X} = -\cos \omega_X \sin \Delta\Omega_X + \sin \omega_X \cos i_X \cos \Delta\Omega_X \qquad (6.4.15)
+$$
+
+$$
+a_{8,X} = \sin \omega_X \sin i_X \qquad (6.4.16)
+$$
+
+$$
+a_{9,X} = \sin \omega_X \sin \Delta\Omega_X + \cos \omega_X \cos i_X \cos \Delta\Omega_X \qquad (6.4.17)
+$$
+
+$$
+a_{10,X} = \cos \omega_X \sin i_X \qquad (6.4.18)
+$$
+
+$$
+a_{2,X} = a_{7,X} \cos i_B + a_{8,X} \sin i_B \qquad (6.4.19)
+$$
+
+$$
+a_{4,X} = a_{9,X} \cos i_B + a_{10,X} \sin i_B \qquad (6.4.20)
+$$
+
+$$
+a_{5,X} = -a_{7,X} \sin i_B + a_{8,X} \cos i_B \qquad (6.4.21)
+$$
+
+$$
+a_{6,X} = -a_{9,X} \sin i_B + a_{10,X} \cos i_B \qquad (6.4.22)
+$$
+
+The coefficients $x_{k,X}$ are given by Eqs. (6.4.23)–(6.4.30).
+
+$$
+x_{1,X} = a_{1,X} \cos \omega_B + a_{2,X} \sin \omega_B \qquad (6.4.23)
+$$
+
+$$
+x_{2,X} = a_{3,X} \cos \omega_B + a_{4,X} \sin \omega_B \qquad (6.4.24)
+$$
+
+$$
+x_{3,X} = -a_{1,X} \sin \omega_B + a_{2,X} \cos \omega_B \qquad (6.4.25)
+$$
+
+$$
+x_{4,X} = -a_{3,X} \sin \omega_B + a_{4,X} \cos \omega_B \qquad (6.4.26)
+$$
+
+$$
+x_{5,X} = a_{5,X} \sin \omega_B \qquad (6.4.27)
+$$
+
+$$
+x_{6,X} = a_{6,X} \sin \omega_B \qquad (6.4.28)
+$$
+
+$$
+x_{7,X} = a_{5,X} \cos \omega_B \qquad (6.4.29)
+$$
+
+$$
+x_{8,X} = a_{6,X} \cos \omega_B \qquad (6.4.30)
+$$
+
+The coefficients $z_{jk,X}$ are given by Eqs. (6.4.31)–(6.4.42). $z_{31,X}$, $z_{32,X}$, and $z_{33,X}$ are evaluated first, as $z_{1,X}$, $z_{2,X}$, and $z_{3,X}$ depend on them.
+
+$$
+z_{31,X} = 12 x_{1,X}^2 - 3 x_{3,X}^2 \qquad (6.4.31)
+$$
+
+$$
+z_{32,X} = 24 x_{1,X} x_{2,X} - 6 x_{3,X} x_{4,X} \qquad (6.4.32)
+$$
+
+$$
+z_{33,X} = 12 x_{2,X}^2 - 3 x_{4,X}^2 \qquad (6.4.33)
+$$
+
+$$
+z_{1,X} = 6 \left(a_{1,X}^2 + a_{2,X}^2\right) + \left(1 + e_B^2\right) z_{31,X} \qquad (6.4.34)
+$$
+
+$$
+z_{2,X} = 12 \left(a_{1,X} a_{3,X} + a_{2,X} a_{4,X}\right) + \left(1 + e_B^2\right) z_{32,X} \qquad (6.4.35)
+$$
+
+$$
+z_{3,X} = 6 \left(a_{3,X}^2 + a_{4,X}^2\right) + \left(1 + e_B^2\right) z_{33,X} \qquad (6.4.36)
+$$
+
+$$
+z_{11,X} = -6 a_{1,X} a_{5,X} + e_B^2 \left(-24 x_{1,X} x_{7,X} - 6 x_{3,X} x_{5,X}\right) \qquad (6.4.37)
+$$
+
+$$
+\begin{aligned}
+z_{12,X} &= -6 a_{1,X} a_{6,X} - 6 a_{3,X} a_{5,X} \\
+&\qquad - e_B^2 \left(24 x_{2,X} x_{7,X} + 24 x_{1,X} x_{8,X} + 6 x_{3,X} x_{6,X} + 6 x_{4,X} x_{5,X}\right)
+\end{aligned} \qquad (6.4.38)
+$$
+
+$$
+z_{13,X} = -6 a_{3,X} a_{6,X} + e_B^2 \left(-24 x_{2,X} x_{8,X} - 6 x_{4,X} x_{6,X}\right) \qquad (6.4.39)
+$$
+
+$$
+z_{21,X} = 6 a_{2,X} a_{5,X} + e_B^2 \left(24 x_{1,X} x_{5,X} - 6 x_{3,X} x_{7,X}\right) \qquad (6.4.40)
+$$
+
+$$
+\begin{aligned}
+z_{22,X} &= 6 a_{4,X} a_{5,X} + 6 a_{2,X} a_{6,X} \\
+&\qquad + e_B^2 \left(24 x_{2,X} x_{5,X} + 24 x_{1,X} x_{6,X} - 6 x_{4,X} x_{7,X} - 6 x_{3,X} x_{8,X}\right)
+\end{aligned} \qquad (6.4.41)
+$$
+
+$$
+z_{23,X} = 6 a_{4,X} a_{6,X} + e_B^2 \left(24 x_{2,X} x_{6,X} - 6 x_{4,X} x_{8,X}\right) \qquad (6.4.42)
+$$
+
+The secular rates are given by Eqs. (6.4.43)–(6.4.47), where $C_X$ and $n_X$ are from Tables B1 and B2.
+
+$$
+\dot{e}_X = -\frac{15 C_X n_X e_B \beta_B}{n_B} \left(x_{1,X} x_{3,X} + x_{2,X} x_{4,X}\right) \qquad (6.4.43)
+$$
+
+$$
+\dot{i}_X = -\frac{C_X n_X}{2 n_B \beta_B} \left(z_{11,X} + z_{13,X}\right) \qquad (6.4.44)
+$$
+
+$$
+\dot{M}_X = -\frac{C_X n_X}{n_B} \left(z_{1,X} + z_{3,X} - 14 - 6 e_B^2\right) \qquad (6.4.45)
+$$
+
+$$
+\dot{\Omega}_X = \frac{C_X n_X}{2 n_B \beta_B \sin i_B} \left(z_{21,X} + z_{23,X}\right) \qquad (6.4.46)
+$$
+
+$$
+\dot{\omega}_X = \frac{C_X n_X \beta_B}{n_B} \left(z_{31,X} + z_{33,X} - 6\right) - \dot{\Omega}_X \cos i_B \qquad (6.4.47)
+$$
+
+For satellites with $i_B < 3^\circ$ or $i_B > 177^\circ$, the third-body RAAN rates $\dot{\Omega}_X$ in Eq. (6.4.46) are set to zero to avoid the division by $\sin i_B$, and the corresponding $\cos i_B$ term in Eq. (6.4.47) is omitted. The retrograde bound follows Vallado et al. ([14]).
 
 ### 6.5 Initialize Earth Half-Day and Whole-Day Resonance Effects
 Implemented in `init_earth_gravity_resonance_halfday`, `init_earth_gravity_resonance_wholeday`, and `calc_theta_g` (`src/sgp4.rs`), stored in `Sgp4.half_day_resonance_params` and `Sgp4.whole_day_resonance_params`.
@@ -1353,6 +1513,153 @@ The inclination, eccentricity, mean motion, and semi-major axis are not changed 
 ### 7.7 Account for Long-Period Periodic Effects of Lunar and Solar Gravity
 Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
 
+We will define the lunar and solar long-period periodic variables with Table 17 below. As in Section 6.4, subscript $X$ denotes the third body, with $X = M$ for the Moon and $X = S$ for the Sun.
+
+<div align="center">
+
+| Variable | Symbol | Units | Definition | Code |
+| --- | --- | --- | --- | --- |
+| Third-Body Mean Anomaly | $M_{X}(t)$ | radians | Third-body mean anomaly at time $t$ | `m_*` |
+| Third-Body True Anomaly | $f_{X}$ | radians | First-order approximation of the third-body true anomaly at time $t$ | `f_*` |
+| F2 | $F_{2,X}$ | - | Second-order function of $f_X$ | `f2_*` |
+| F3 | $F_{3,X}$ | - | Second-order function of $f_X$ | `f3_*` |
+| Eccentricity Correction | $\delta e_{X}$ | - | Periodic correction to the eccentricity | `delta_e_*` |
+| Inclination Correction | $\delta i_{X}$ | radians | Periodic correction to the inclination | `delta_i_*` |
+| Mean Anomaly Correction | $\delta M_{X}$ | radians | Periodic correction to the mean anomaly | `delta_m_*` |
+| Scaled RAAN Correction | $\delta \Omega'_{X}$ | radians | Periodic correction to the RAAN, scaled by $\sin i$ | `delta_raan_*` |
+| Combined Argument of Perigee Correction | $\delta \omega'_{X}$ | radians | Periodic correction to the argument of perigee, plus $\cos i$ times the RAAN correction | `delta_omega_*` |
+| Lyddane Sine Component | $\alpha_{\Omega}$ | - | Perturbed $\sin i \sin \Omega$ | `alpha` |
+| Lyddane Cosine Component | $\beta_{\Omega}$ | - | Perturbed $\cos \Omega \sin i$ | `beta` |
+| Lyddane Longitude | $L'$ | radians | Perturbed $M + \omega + \Omega \cos i$ | `m_omega_raan` |
+
+</div>
+
+<p align="center"><strong>Table 17.</strong> Lunar and solar long-period periodic variables (Code entries are local variables in <code>sgp4_prop_delta</code>; <code>*</code> is <code>m</code> for the Moon or <code>s</code> for the Sun, and the summed corrections use <code>ls</code>)</p>
+
+The lunar and solar long-period periodic effects are only applied to deep-space satellites (Eq. (6.4.1)). For near-Earth satellites, this step is skipped.
+
+The mean anomalies of the Moon and Sun at time $t$ are given by Eq. (7.7.1), where $M_X$ is from Eqs. (6.4.10)–(6.4.11) and $n_X$ is from Tables B1 and B2.
+
+$$
+M_X(t) = M_X + n_X t \qquad (7.7.1)
+$$
+
+The true anomaly of each third body is approximated to first order in $e_X$ by Eq. (7.7.2). The periodic corrections depend on $f_X$ through the functions in Eqs. (7.7.3)–(7.7.4).
+
+$$
+f_X = M_X(t) + 2 e_X \sin M_X(t) \qquad (7.7.2)
+$$
+
+$$
+F_{2,X} = \frac{1}{2} \sin^2 f_X - \frac{1}{4} \qquad (7.7.3)
+$$
+
+$$
+F_{3,X} = -\frac{1}{2} \sin f_X \cos f_X \qquad (7.7.4)
+$$
+
+The periodic corrections from each third body are given by Eqs. (7.7.5)–(7.7.9), where $C_X$, $e_X$, and the geometric coefficients $x_{k,X}$ and $z_{jk,X}$ are from Table 9. All of the satellite elements in these equations are the Brouwer mean elements at epoch ($e_B$, $\beta_B$, and $n_B$), not the time-varying elements.
+
+$$
+\delta e_X = -\frac{30 \beta_B C_X e_B}{n_B} \left[F_{2,X} \left(x_{2,X} x_{3,X} + x_{1,X} x_{4,X}\right) + F_{3,X} \left(x_{2,X} x_{4,X} - x_{1,X} x_{3,X}\right)\right] \qquad (7.7.5)
+$$
+
+$$
+\delta i_X = -\frac{C_X}{n_B \beta_B} \left[F_{2,X} z_{12,X} + F_{3,X} \left(z_{13,X} - z_{11,X}\right)\right] \qquad (7.7.6)
+$$
+
+$$
+\delta M_X = -\frac{2 C_X}{n_B} \left[F_{2,X} z_{2,X} + F_{3,X} \left(z_{3,X} - z_{1,X}\right) - 3 e_X \sin f_X \left(7 + 3 e_B^2\right)\right] \qquad (7.7.7)
+$$
+
+$$
+\delta \Omega'_X = \frac{C_X}{n_B \beta_B} \left[F_{2,X} z_{22,X} + F_{3,X} \left(z_{23,X} - z_{21,X}\right)\right] \qquad (7.7.8)
+$$
+
+$$
+\delta \omega'_X = \frac{2 \beta_B C_X}{n_B} \left[F_{2,X} z_{32,X} + F_{3,X} \left(z_{33,X} - z_{31,X}\right) - 9 e_X \sin f_X\right] \qquad (7.7.9)
+$$
+
+The RAAN and argument of perigee corrections are not the corrections $\delta \Omega_X$ and $\delta \omega_X$ themselves. They are carried in the forms $\delta \Omega'_X = \sin i \, \delta \Omega_X$ and $\delta \omega'_X = \delta \omega_X + \cos i \, \delta \Omega_X$, which remain finite as $i \to 0$.
+
+The lunar and solar corrections are summed, as given by Eq. (7.7.10).
+
+$$
+\delta x = \delta x_M + \delta x_S, \quad x \in \left\lbrace e, i, M, \Omega', \omega' \right\rbrace \qquad (7.7.10)
+$$
+
+The corrections are evaluated directly at time $t$ and are not referenced to their values at epoch, so they are nonzero at $t = 0$.
+
+The eccentricity and inclination are updated by Eqs. (7.7.11)–(7.7.12). If the perturbed eccentricity satisfies $e < 0$ or $e \ge 1$, propagation is invalid.
+
+$$
+e \mathrel{+}= \delta e \qquad (7.7.11)
+$$
+
+$$
+i \mathrel{+}= \delta i \qquad (7.7.12)
+$$
+
+The RAAN, argument of perigee, and mean anomaly are updated with one of two methods, depending on the perturbed inclination $i$ from Eq. (7.7.12).
+
+For $i > 0.2$ rad (about $11.5^\circ$), the corrections are applied directly, as given by Eqs. (7.7.13)–(7.7.15).
+
+$$
+\Omega \mathrel{+}= \frac{\delta \Omega'}{\sin i} \qquad (7.7.13)
+$$
+
+$$
+\omega \mathrel{+}= \delta \omega' - \frac{\cos i}{\sin i} \delta \Omega' \qquad (7.7.14)
+$$
+
+$$
+M \mathrel{+}= \delta M \qquad (7.7.15)
+$$
+
+For $i \le 0.2$ rad, SGP4 uses the Lyddane modification ([5]) to avoid the division by $\sin i$. It perturbs $\sin i \sin \Omega$, $\sin i \cos \Omega$, and $M + \omega + \Omega \cos i$, none of which are singular at $i = 0$, as given by Eqs. (7.7.16)–(7.7.18). $\Omega$, $\omega$, and $M$ on the right-hand side are the values from Section 7.6, and $i$ is the perturbed inclination from Eq. (7.7.12).
+
+$$
+\alpha_{\Omega} = \sin i \sin \Omega + \cos \Omega \, \delta \Omega' + \cos i \sin \Omega \, \delta i \qquad (7.7.16)
+$$
+
+$$
+\beta_{\Omega} = \sin i \cos \Omega - \sin \Omega \, \delta \Omega' + \cos i \cos \Omega \, \delta i \qquad (7.7.17)
+$$
+
+$$
+L' = M + \omega + \delta M + \delta \omega' + \left(\cos i - \delta i \sin i\right) \Omega \qquad (7.7.18)
+$$
+
+The perturbed RAAN is recovered by Eq. (7.7.19). Because $\mathrm{atan2}$ returns a value in $(-\pi, \pi]$ while $\Omega$ from Section 7.6 lies in $(-2\pi, 2\pi)$, the result is shifted by $2\pi$ when it differs from the previous RAAN $\Omega_{old}$ by more than $\pi$, as given by Eq. (7.7.20). This follows Vallado et al. ([14]).
+
+$$
+\Omega = \mathrm{atan2}\left(\alpha_{\Omega}, \beta_{\Omega}\right) \qquad (7.7.19)
+$$
+
+$$
+\Omega \mathrel{+}= \begin{cases}
+2\pi & \left|\Omega_{old} - \Omega\right| > \pi \text{ and } \Omega < \Omega_{old} \\
+-2\pi & \left|\Omega_{old} - \Omega\right| > \pi \text{ and } \Omega \ge \Omega_{old} \\
+0 & \left|\Omega_{old} - \Omega\right| \le \pi
+\end{cases} \qquad (7.7.20)
+$$
+
+The mean anomaly is updated as in the direct method, and the argument of perigee is recovered from the perturbed longitude, as given by Eqs. (7.7.21)–(7.7.22). Eq. (7.7.22) uses the updated $M$ and $\Omega$.
+
+$$
+M \mathrel{+}= \delta M \qquad (7.7.21)
+$$
+
+$$
+\omega = L' - M - \Omega \cos i \qquad (7.7.22)
+$$
+
+Finally, the periodic corrections can push a near-equatorial inclination below zero. In that case, the orbit is reflected back into $i \in [0, \pi]$, as given by Eq. (7.7.23). The reflection follows Vallado et al. ([14]).
+
+$$
+\left(i, \Omega, \omega\right) = \left(-i, \Omega + \pi, \omega - \pi\right) \quad \text{if } i < 0 \qquad (7.7.23)
+$$
+
 ### 7.8 Account for Long-Period Periodic Effects of Earth's Gravity
 Implemented in `sgp4_prop_delta` (`src/sgp4.rs`).
 
@@ -1377,7 +1684,7 @@ mako-sgp4 is verified by two reference test suites in the `test/` directory, run
 
 </div>
 
-<p align="center"><strong>Table 17.</strong> Verification test suites</p>
+<p align="center"><strong>Table 18.</strong> Verification test suites</p>
 
 ## Appendix A: World Geodetic System (WGS) Models
 
