@@ -5,7 +5,7 @@
   <img src="../assets/logo_dark.png" alt="mako-sgp4 logo" width="240">
 </p>
 
-**Abstract.** This document outlines the mathematics implemented by [mako-sgp4](https://github.com/markparal/mako-sgp4), a Rust implementation of the SGP4/SDP4 orbit propagator. It describes the general perturbation (GP) element set formats the crate ingests (TLE and OMM), the equations used to initialize the propagator, and the equations used to propagate the satellite state to a requested time. References to the source code are made throughout as this document is intended to be read alongside the code. The implementation follows the theory of Hoots et al. with the practical corrections of Vallado et al., and it is verified against both reference implementations to within 1 mm in position and 1 mm/s in velocity.
+**Abstract.** This document outlines the mathematics implemented by [mako-sgp4](https://github.com/markparal/mako-sgp4), a Rust implementation of the SGP4/SDP4 orbit propagator. It describes the general perturbation (GP) element set formats the crate ingests (TLE and OMM), the equations used to initialize the propagator, and the equations used to propagate the satellite state to a requested time. References to the source code are made throughout as this document is intended to be read alongside the code. The implementation follows the theory of Hoots et al. with the practical corrections of Vallado et al., and it is verified against the reference ephemerides of Vallado et al. and against python-sgp4 to within 1 mm in position and 1 mm/s in velocity.
 
 ## Table of Contents
 - [1. Introduction](#1-introduction)
@@ -19,6 +19,7 @@
     - [4.3 Conventions](#43-conventions)
     - [4.4 Acronyms](#44-acronyms)
 - [5. SGP4 Algorithm Overview](#5-sgp4-algorithm-overview)
+    - [5.1 Diagram](#51-diagram)
 - [6. Initialization](#6-initialization)
     - [6.1 Recover Brouwer Mean Elements](#61-recover-brouwer-mean-elements)
     - [6.2 Initialize Atmospheric Drag Parameters](#62-initialize-atmospheric-drag-parameters)
@@ -50,7 +51,7 @@ On October 4th, 1957, Sputnik was launched into orbit by the Soviet Union. With 
 
 Critical to this infrastructure is the Simplified General Perturbations 4 model (SGP4), which, using provided general perturbation element sets (GPs), generates reliably accurate (sub-1 km position error at epoch) position and velocity state estimates for each cataloged orbiting object. Originally implemented in 1970, SGP4 strikes a difficult balance between computational efficiency and accuracy as a semianalytical orbital propagator. The impressiveness of this achievement cannot be overstated, as it remains one of, if not the most, important propagator in the industry nearly 56 years later (as of 2026).
 
-As a member of the space community who makes active use of these SSA resources, [mako-sgp4](https://github.com/markparal/mako-sgp4) ([10]) was developed to gain a deeper understanding of the underlying theory behind this immensely important model. It combines both the theory detailed in *History of Analytical Orbit Modeling in the U.S. Space Surveillance System* by Hoots et al. ([9]) and the practical implementation fixes perscribed in *Revisiting Spacetrack Report #3: Rev 3* by Vallado et al. ([14]). The rest of this document will dive into this theory to facilitate understanding of the codebase.
+As a member of the space community who makes active use of these SSA resources, [mako-sgp4](https://github.com/markparal/mako-sgp4) ([10]) was developed to gain a deeper understanding of the underlying theory behind this immensely important model. It combines both the theory detailed in *History of Analytical Orbit Modeling in the U.S. Space Surveillance System* by Hoots et al. ([9]) and the practical implementation fixes prescribed in *Revisiting Spacetrack Report #3: Rev 3* by Vallado et al. ([14]). The rest of this document will dive into this theory to facilitate understanding of the codebase.
 
 ## 2. SGP4 Historical Background
 For a complete historical rundown of the development of SGP4, it is recommended to read *History of Analytical Orbit Modeling in the U.S. Space Surveillance System* by Hoots et al. ([9]), which details the creation and evolution of the U.S. Space Surveillance system. This paper also discusses the various theories and works that contributed to the modern SGP4 algorithm. A (non-exhaustive) list includes:
@@ -80,7 +81,7 @@ For a complete historical rundown of the development of SGP4, it is recommended 
 | Eccentricity | $e_B$ | - | Orbital eccentricity |
 | Argument of Perigee | $\omega_B$ | degrees | Orbital argument of perigee |
 | Mean Anomaly | $M_B$ | degrees | Orbital mean anomaly |
-| Mean Motion | $n_{K}$ | revolutions/day | Kozai Mean motion |
+| Mean Motion | $n_{K}$ | revolutions/day | Kozai mean motion |
 | Revolution Number at Epoch | - | revs | Revolution number at epoch |
 
 </div>
@@ -100,7 +101,7 @@ ISS (ZARYA)
 2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537
 ```
 
-A detailed breakdown of the TLE format and its associated fields can be found at [11]. The standard format follows the convention depicted below, where `N` is a number 0-9 (or a space in certain cases), `C` is the classification character, `P` is any character A-Z (or a space in certain cases), `+` indicates either a '+', '-', or space must be present, `-` indicates a '+' or '-' must be present, `A` is the Alpha-5 encoded digit which can be a character (excluding I and O), digit, or space, and `D` is any printable character or space. Note that line 0 is optional. Table 2 describes what character correspond to what element field.
+A detailed breakdown of the TLE format and its associated fields can be found at [11]. The standard format follows the convention depicted below, where `N` is a number 0-9 (or a space in certain cases), `C` is the classification character, `P` is any character A-Z (or a space in certain cases), `+` indicates either a '+', '-', or space must be present, `-` indicates a '+' or '-' must be present, `A` is the Alpha-5 encoded digit which can be a character (excluding I and O), digit, or space, and `D` is any printable character or space. Line 0 is optional. Table 2 describes which characters correspond to each element field.
 
 ```
 DDDDDDDDDDDDDDDDDDDDDDDD
@@ -183,15 +184,15 @@ MEAN_MOTION_DOT = .6535E-4
 MEAN_MOTION_DDOT = 0
 ```
 
-The standards for the OMM format and its associated fields can be found at [13]. Table 3 describes what keyword correspond to what element field.
+The standards for the OMM format and its associated fields can be found at [13]. Table 3 describes which keyword corresponds to each element field.
 
 <div align="center">
 
 | Keyword | Field | Units | Notes |
 | --- | --- | --- | --- |
 | CCSDS_OMM_VERS | - | - | Typically `2.0` |
-| CREATION_DATE | - | - | Optional |
-| ORIGINATOR | - | - | Optional |
+| CREATION_DATE | - | - | Optional in mako-sgp4 (mandatory in CCSDS) |
+| ORIGINATOR | - | - | Optional in mako-sgp4 (mandatory in CCSDS) |
 | OBJECT_NAME | Common Name | - | Optional |
 | OBJECT_ID | International Designator | - | Full `Y-NP` form |
 | CENTER_NAME | - | - | Always `EARTH` |
@@ -233,7 +234,7 @@ Unless stated otherwise, the equations in Sections 6 and 7 use the internal SGP4
 | Time | minutes | $t$ is the time since the GP element set epoch |
 | Angles | radians | GP angles $i_B$, $\Omega_B$, $\omega_B$, $M_B$ are converted from degrees |
 | Mean motion | radians/min | $n_K$ is converted from revolutions/day by $n_K \cdot 2\pi / 1440$ |
-| Rates | per minute | Except the lunar and solar constants in Appendix B, which are per day |
+| Rates | per minute | Except the lunar and solar epoch rates in Appendix B ($\dot{\Omega}_{Me0}$, $\dot{u}_{Me0}$, $\dot{M}_{M0}$, $\dot{M}_{S0}$), which are per day |
 | Dates | days | Julian dates in UTC |
 
 </div>
@@ -264,12 +265,17 @@ Unless stated otherwise, the equations in Sections 6 and 7 use the internal SGP4
 | CCSDS | Consultative Committee for Space Data Systems |
 | COSPAR | Committee on Space Research (international designator authority) |
 | ECI | Earth-centered inertial |
+| GEO | Geosynchronous Earth orbit |
 | GMST | Greenwich mean sidereal time |
 | GP | General perturbations (element set) |
+| GPS | Global Positioning System |
+| GTO | Geosynchronous transfer orbit |
 | IAU | International Astronomical Union |
 | JD | Julian date |
-| MJD | Modified Julian date |
 | KVN | Keyword-value notation |
+| LEO | Low Earth orbit |
+| MEO | Medium Earth orbit |
+| MJD | Modified Julian date |
 | NORAD | North American Aerospace Defense Command (catalog number authority) |
 | OMM | Orbit mean-elements message |
 | RAAN | Right ascension of the ascending node |
@@ -467,7 +473,7 @@ $$
 Additional constants are defined with Eqs. (6.2.5)–(6.2.8) ($A_{3,0}$ is in units of Earth Radii^3)
 
 $$
-A_{3,0} = -J_3 R_e^3 / R_e^3 \qquad (6.2.5)
+A_{3,0} = -J_3 a_E^3 \qquad (6.2.5)
 $$
 
 $$
@@ -551,7 +557,7 @@ The Earth zonal harmonics parameters are defined in Table 8 below.
 
 <p align="center"><strong>Table 8.</strong> Earth zonal harmonics parameters</p>
 
-The Earth zonal harmonics in SGP4 consider the impacts of $J_2$ and $J_4$. The resulting secular rates of the Brouwer mean elements are given in Eqs. (6.3.1)–(6.3.3). Note that $\dot{M}_B$ excludes the unperturbed motion $n_B$, so the total secular rate of the mean anomaly is $n_B + \dot{M}_B$.
+The Earth zonal harmonics in SGP4 consider the impacts of $J_2$ and $J_4$. The resulting secular rates of the Brouwer mean elements are given in Eqs. (6.3.1)–(6.3.3). $\dot{M}_B$ excludes the unperturbed motion $n_B$, so the total secular rate of the mean anomaly is $n_B + \dot{M}_B$.
 
 $$
 \begin{aligned}
@@ -631,13 +637,13 @@ The lunar and solar third-body parameters are defined in Table 9 below.
 
 <p align="center"><strong>Table 9.</strong> Lunar and solar third-body parameters (subscript <em>X</em> = <em>M</em> for the Moon, <em>X</em> = <em>S</em> for the Sun; in the Code column, <code>*</code> is <code>lunar</code> or <code>solar</code>)</p>
 
-The lunar and solar third-body effects are only considered if the spacecraft has a period greater than or equal to 225 minutes, as given by Eq. (6.4.1). If this is the case, this spacecraft is classified as a "deep-space" satellite.
+The lunar and solar third-body effects are only considered if the satellite has a period greater than or equal to 225 minutes, as given by Eq. (6.4.1). If this is the case, the satellite is classified as a "deep-space" satellite.
 
 $$
 T_B \ge 225 \text{ min} \quad \text{(deep space, } n_B \le 2\pi / 225 \approx 0.0279253 \text{ rad/min)} \qquad (6.4.1)
 $$
 
-The constants used for modeling the orbits and gravitational effects of the Sun and Moon are given in Tables B1 and B2. The time difference between the solar/lunar epoch and the GP element set epoch is defined as $\Delta t = JD_0 - t_{SM}$ in days, where $JD_0$ is the Julian date of the GP element set epoch. The orbital parameters are calculated with Eqs. (6.4.2)–(6.4.11).
+The constants used for modeling the orbits and gravitational effects of the Sun and Moon are given in Tables B1 and B2. The time difference between the solar/lunar epoch and the GP element set epoch is defined as $\Delta t = JD_0 + JD_{frac,0} - t_{SM}$ in days, where $JD_0$ and $JD_{frac,0}$ are the Julian date and day fraction of the GP element set epoch (Eqs. (7.1.3)–(7.1.4)). The orbital parameters are calculated with Eqs. (6.4.2)–(6.4.11).
 
 $$
 \Omega_{Me} = \left(\Omega_{Me0} + \dot{\Omega}_{Me0} \Delta t\right) \bmod 2\pi \qquad (6.4.2)
@@ -884,7 +890,7 @@ $$
 Both resonances are referenced to the Greenwich mean sidereal time at epoch. This is computed with the IAU-82 model in Eqs. (6.5.3)–(6.5.4), where $T_{UT1}$ is the number of Julian centuries since J2000.0. mako-sgp4 uses the UTC epoch in place of UT1.
 
 $$
-T_{UT1} = \frac{JD_0 - 2451545.0}{36525} \qquad (6.5.3)
+T_{UT1} = \frac{JD_0 + JD_{frac,0} - 2451545.0}{36525} \qquad (6.5.3)
 $$
 
 $$
@@ -973,7 +979,7 @@ $$
 
 <p align="center"><strong>Table 11.</strong> Half day resonance eccentricity function coefficients</p>
 
-The half-day resonance coefficients are then given by Eqs. (6.5.17)–(6.5.26). Note that several of the $D_{44pq}$ and $D_{54pq}$ expressions printed in Hoots et al. ([9]) contain typos.
+The half-day resonance coefficients are then given by Eqs. (6.5.17)–(6.5.26). Several of the $D_{44pq}$ and $D_{54pq}$ expressions printed in Hoots et al. ([9]) contain typos.
 
 $$
 D_{2201} = \frac{3 n_B^2}{a_B^2} Q_{22} F_{220} G_{201} \qquad (6.5.17)
@@ -1025,7 +1031,7 @@ $$
 \dot{\lambda}_0 = \dot{M}_B + \dot{M}_M + \dot{M}_S + 2\left(\dot{\Omega}_B + \dot{\Omega}_M + \dot{\Omega}_S\right) - 2\dot{\theta}_E \qquad (6.5.28)
 $$
 
-For whole-day resonance, the functions of inclination and eccentricity are given in Eqs. (6.5.29)–(6.5.34). $F_{220}$ is the same function as Eq. (6.5.5) in the half-day resonance, and is repeated here for completeness. However, note that the whole-day $G_{310}$ in Eq. (6.5.33) is a different function from the half-day $G_{310}$ in Table 11, despite sharing the same name. 
+For whole-day resonance, the functions of inclination and eccentricity are given in Eqs. (6.5.29)–(6.5.34). $F_{220}$ is the same function as Eq. (6.5.5) in the half-day resonance, and is repeated here for completeness. However, the whole-day $G_{310}$ in Eq. (6.5.33) is a different function from the half-day $G_{310}$ in Table 11, despite sharing the same name. 
 
 $$
 F_{220} = \frac{3}{4} \left(1 + \theta_B\right)^2 \qquad (6.5.29)
@@ -1078,7 +1084,7 @@ $$
 During propagation, $\lambda_0$ and $n_B$ are numerically integrated forward in time using these coefficients (see Section 7.4).
 
 ## 7. Propagation
-Once a time is provided at which to propagate to, the state of the spacecraft can be calculated using the values found in the initialization process (stored in the `Sgp4` struct).
+Once a time is provided at which to propagate to, the state of the satellite can be calculated using the values found in the initialization process (stored in the `Sgp4` struct).
 
 The propagation process can be broken into a series of steps that will be covered individually. These steps are
 1. Calculate the time since epoch
@@ -1096,7 +1102,7 @@ The propagation process can be broken into a series of steps that will be covere
 ### 7.1 Calculate the Time Since Epoch
 Implemented in `sgp4_prop_datetime` (`src/sgp4.rs`) and `utc2jday` (`src/time.rs`), with the epoch stored in `Sgp4.jd0` and `Sgp4.jdfrac0`.
 
-Every propagation equation in Sections 7.2–7.11 is a function of $t$, the time since the GP element set epoch in minutes (Table 4). Note that $t$ can be a negative value to propagate to an earlier time. `sgp4_prop_delta` accepts $t$ directly, in which case this step is skipped. `sgp4_prop_datetime` instead accepts a UTC calendar date and time, so $t$ must first be calculated by converting both the requested time and the epoch to Julian dates.
+Every propagation equation in Sections 7.2–7.11 is a function of $t$, the time since the GP element set epoch in minutes (Table 4). $t$ can be negative to propagate to an earlier time. `sgp4_prop_delta` accepts $t$ directly, in which case this step is skipped. `sgp4_prop_datetime` instead accepts a UTC calendar date and time, so $t$ must first be calculated by converting both the requested time and the epoch to Julian dates.
 
 For a UTC date and time with year $y$, month $m$, day $d$, and time of day $\text{hr}$, $\text{min}$, $\text{sec}$, the year is shifted to start in March so that the leap day falls at the end of the year, as shown in Eq. (7.1.1). Equations (7.1.1)–(7.1.4) follow Montenbruck et al. ([15]).
 
@@ -1439,7 +1445,7 @@ $$
 n = \frac{k_e}{a^{3/2}} \qquad (7.5.5)
 $$
 
-The drag correction to the mean longitude is given by Eqs. (7.5.6)–(7.5.7), respectively. Both use the Brouwer mean motion $n_B$ rather than the updated $n$.
+The drag correction to the mean longitude is given by Eqs. (7.5.6)–(7.5.7) for the full and simplified drag models, respectively. Both use the Brouwer mean motion $n_B$ rather than the updated $n$.
 
 $$
 \begin{aligned}
@@ -1600,9 +1606,9 @@ $$
 i \mathrel{+}= \delta i \qquad (7.7.12)
 $$
 
-The RAAN, argument of perigee, and mean anomaly are updated with one of two methods, depending on the perturbed inclination $i$ from Eq. (7.7.12).
+The RAAN, argument of perigee, and mean anomaly are updated with one of two methods, depending on the perturbed inclination $i$ from Eq. (7.7.12). The branch threshold $i \ge 0.2$ rad follows Vallado et al. ([14]) and differs from Hoots et al. ([9]).
 
-For $i > 0.2$ rad (about $11.5^\circ$), the corrections are applied directly, as given by Eqs. (7.7.13)–(7.7.15).
+For $i \ge 0.2$ rad (about $11.5^\circ$), the corrections are applied directly, as given by Eqs. (7.7.13)–(7.7.15).
 
 $$
 \Omega \mathrel{+}= \frac{\delta \Omega'}{\sin i} \qquad (7.7.13)
@@ -1616,7 +1622,7 @@ $$
 M \mathrel{+}= \delta M \qquad (7.7.15)
 $$
 
-For $i \le 0.2$ rad, SGP4 uses the Lyddane modification ([5]) to avoid the division by $\sin i$. It perturbs $\sin i \sin \Omega$, $\sin i \cos \Omega$, and $M + \omega + \Omega \cos i$, none of which are singular at $i = 0$, as given by Eqs. (7.7.16)–(7.7.18). $\Omega$, $\omega$, and $M$ on the right-hand side are the values from Section 7.6, and $i$ is the perturbed inclination from Eq. (7.7.12).
+For $i < 0.2$ rad, SGP4 uses the Lyddane modification ([5]) to avoid the division by $\sin i$. It perturbs $\sin i \sin \Omega$, $\sin i \cos \Omega$, and $M + \omega + \Omega \cos i$, none of which are singular at $i = 0$, as given by Eqs. (7.7.16)–(7.7.18). $\Omega$, $\omega$, and $M$ on the right-hand side are the values from Section 7.6, and $i$ is the perturbed inclination from Eq. (7.7.12).
 
 $$
 \alpha_{\Omega} = \sin i \sin \Omega + \cos \Omega \, \delta \Omega' + \cos i \sin \Omega \, \delta i \qquad (7.7.16)
@@ -2072,7 +2078,7 @@ Thank you!
 
 | Revision | Date | Crate Version | Changes |
 | --- | --- | --- | --- |
-| 1 | 2026-10-04 | 0.2.0 | Initial release: GP element set formats, initialization, verification |
+| 1 | 2026-10-06 | 0.2.0 | Initial release: GP element set formats, notation, initialization, propagation, verification |
 
 </div>
 

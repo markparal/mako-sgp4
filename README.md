@@ -21,7 +21,7 @@ mako-sgp4 is verified against the standard Vallado test cases and additional tes
 
 ## Documentation
 
-The full API is on [docs.rs](https://docs.rs/mako-sgp4). The crate requires Rust 1.85 or newer (`edition = "2024"`). The style guide and math spec live in the `docs/` directory.
+The full API is on [docs.rs](https://docs.rs/mako-sgp4). The crate requires Rust 1.85 or newer (`edition = "2024"`). The [math specification](docs/mathspec.md) documents every equation the crate implements, with references to the source code, and the [style guide](docs/styleguide.md) covers contribution conventions.
 
 ```bash
 # Unit tests, doctests, and default features (XML / JSON / CSV)
@@ -103,7 +103,6 @@ cargo add mako-sgp4 --no-default-features --features json,csv # Exclude XML
 ```
 
 ## Future Work
-- Finish math spec
 - Fit state data to GP
 - Python wrapper
 

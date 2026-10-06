@@ -1771,7 +1771,8 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> Result<StateVector, Sgp4Err
         }
         i += delta_i_ls;
 
-        if i > 0.2 {
+        // Vallado threshold (i >= 0.2 on the perturbed inclination), differs from Hoots et al 2004
+        if i >= 0.2 {
             // Notation is confusing in paper, delta_omega_ls stores more than just delta_omega
             // Same for delta_raan_ls, stores more than just delta_raan
             raan += delta_raan_ls / i.sin();
