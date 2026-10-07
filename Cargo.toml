@@ -1,6 +1,6 @@
 [package]
 name = "mako-sgp4"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.85"
 authors = [
@@ -32,6 +32,9 @@ include = [
     "/LICENSE*",
 ]
 
+[workspace]
+members = ["wasm"]
+
 [lib]
 name = "mako_sgp4"
 path = "src/lib.rs"
@@ -62,3 +65,9 @@ required-features = ["json"]
 [[example]]
 name = "propagate_omm_csv"
 required-features = ["csv"]
+
+# Size-optimized release profile for the WebAssembly build (wasm-pack build --profile wasm-release)
+[profile.wasm-release]
+inherits = "release"
+opt-level = "s"
+lto = true

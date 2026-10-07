@@ -1406,7 +1406,8 @@ fn init_earth_gravity_resonance_wholeday(
 
 /// Calculate Greenwich mean sidereal time (GMST) / longitude of Greenwich at a Julian date.
 ///
-/// Used as `theta_g` when initializing 12 h / 24 h resonance terms.
+/// Used as `theta_g` when initializing 12 h / 24 h resonance terms. Also gives the rotation
+/// angle between TEME and an Earth-fixed frame (neglecting polar motion).
 ///
 /// # Arguments
 /// * `jd0` - Julian day (integer part) \[days\]
@@ -1415,9 +1416,20 @@ fn init_earth_gravity_resonance_wholeday(
 /// # Returns
 /// * `theta_g` - GMST \[rad\], wrapped to \[0, 2 * pi)
 ///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::sgp4::calc_theta_g;
+///
+/// // GMST at the J2000.0 epoch (2000-01-01 12:00 UT1)
+/// let theta_g = calc_theta_g(2451545.0, 0.0);
+///
+/// // GMST is about 280.46 degrees
+/// assert!((theta_g.to_degrees() - 280.46061837).abs() < 1e-8);
+/// ```
+///
 /// # References
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
-fn calc_theta_g(jd0: f64, jdfrac0: f64) -> f64 {
+pub fn calc_theta_g(jd0: f64, jdfrac0: f64) -> f64 {
     // Calculate the Julian centuries since J2000.0
     let tut1 = (jd0 + jdfrac0 - 2451545.0) / 36525.0; // [centuries]
 

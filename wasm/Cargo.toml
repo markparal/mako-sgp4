@@ -1,0 +1,19 @@
+[package]
+name = "mako-sgp4-wasm"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+authors = [
+    "Mark Paral",
+]
+description = "WebAssembly bindings for mako-sgp4"
+repository = "https://github.com/markparal/mako-sgp4"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+mako-sgp4 = { path = "..", default-features = false }
+wasm-bindgen = "0.2"

@@ -38,7 +38,7 @@ pub use gp::{from_omm_json_file, from_omm_json_string, to_omm_json_file, to_omm_
 #[doc(inline)]
 pub use gp::{from_omm_xml_file, from_omm_xml_string, to_omm_xml_file, to_omm_xml_string};
 #[doc(inline)]
-pub use sgp4::{Sgp4, Sgp4Error, init_sgp4, sgp4_prop_datetime, sgp4_prop_delta};
+pub use sgp4::{Sgp4, Sgp4Error, calc_theta_g, init_sgp4, sgp4_prop_datetime, sgp4_prop_delta};
 #[doc(inline)]
 pub use time::{
     DateError, DateTime, Timezone, dayofyr2utc, utc2jday, utc2mjday, validate_datetime,

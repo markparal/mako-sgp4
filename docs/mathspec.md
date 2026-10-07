@@ -1971,6 +1971,7 @@ mako-sgp4 is verified by two reference test suites in the `test/` directory, run
 | --- | --- | --- | --- | --- |
 | `mu` | $\mu_{e}$ | km^3/s^2 | 398600.8 | Standard gravitational parameter |
 | `r_earth_eq` | $R_{e}$ | km | 6378.135 | Earth's equatorial radius |
+| `flattening` | $f$ | - | 1 / 298.26 | Earth's flattening |
 | `j2` | $J_{2}$ | - | 0.001082616 | Second zonal harmonic (Earth's oblateness) |
 | `k2` | $k_{2}$ | Earth radii^2 | 0.000541308 | $k_{2} = \frac{1}{2} J_{2}$ |
 | `j3` | $J_{3}$ | - | -0.00000253881 | Third zonal harmonic (pear-shaped component) |
@@ -1988,6 +1989,7 @@ mako-sgp4 is verified by two reference test suites in the `test/` directory, run
 | --- | --- | --- | --- | --- |
 | `mu` | $\mu_{e}$ | km^3/s^2 | 398600.5 | Standard gravitational parameter |
 | `r_earth_eq` | $R_{e}$ | km | 6378.137 | Earth's equatorial radius |
+| `flattening` | $f$ | - | 1 / 298.257223563 | Earth's flattening |
 | `j2` | $J_{2}$ | - | 0.00108262998905 | Second zonal harmonic (Earth's oblateness) |
 | `k2` | $k_{2}$ | Earth radii^2 | 0.000541314994525 | $k_{2} = \frac{1}{2} J_{2}$ |
 | `j3` | $J_{3}$ | - | -0.00000253215306 | Third zonal harmonic (pear-shaped component) |
@@ -2079,6 +2081,7 @@ Thank you!
 | Revision | Date | Crate Version | Changes |
 | --- | --- | --- | --- |
 | 1 | 2026-10-06 | 0.2.0 | Initial release: GP element set formats, notation, initialization, propagation, verification |
+| 2 | 2026-10-06 | 0.3.0 | Added Earth's flattening to the WGS-72 and WGS-84 constants (Tables A1 and A2) |
 
 </div>
 

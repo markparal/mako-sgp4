@@ -102,6 +102,26 @@ cargo add mako-sgp4 --no-default-features                     # TLE and KVN only
 cargo add mako-sgp4 --no-default-features --features json,csv # Exclude XML
 ```
 
+## WebAssembly
+
+mako-sgp4 compiles to WebAssembly so it can run in a web browser. The [`wasm/`](wasm/) directory contains JavaScript bindings for TLE and OMM KVN parsing, propagation, and ground tracks. Build them with wasm-pack:
+
+```bash
+cd wasm
+wasm-pack build --target web --profile wasm-release
+```
+
+```js
+import init, { Satellite } from './mako_sgp4_wasm.js';
+await init();
+
+const sat = new Satellite(tleText);
+const state = sat.propagate(60);               // [x, y, z, vx, vy, vz] 60 min after epoch, TEME [km, km/s]
+const track = sat.trackGeodetic(0, 1440, 1);   // [lat, lon, alt, ...] for one day [deg, deg, km]
+```
+
+See the [wasm README](wasm/README.md) for setup and the full API.
+
 ## Future Work
 - Fit state data to GP
 - Python wrapper
