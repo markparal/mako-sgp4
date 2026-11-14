@@ -1506,7 +1506,8 @@ pub fn calc_theta_g(jd0: f64, jdfrac0: f64) -> f64 {
 /// Propagate an initialized [`Sgp4`] model to a UTC [`DateTime`].
 ///
 /// Converts `datetime` to Julian date, forms minutes since the TLE epoch, then
-/// calls [`sgp4_prop_delta`].
+/// calls [`sgp4_prop_delta`]. For resonant deep-space orbits, run time grows
+/// with the time between `datetime` and the epoch; see [`sgp4_prop_delta`].
 ///
 /// # Arguments
 /// * `sgp4` - Initialized propagator
@@ -1566,6 +1567,15 @@ pub fn sgp4_prop_datetime(sgp4: &Sgp4, datetime: &DateTime) -> Result<StateVecto
 /// applicable), long-period periodics, then the short-period Kepler / J2 solution.
 /// Returns [`Sgp4Error`] on non-physical intermediate elements (e.g. mean motion <= 0,
 /// eccentricity out of range, decayed radius), matching Vallado-style checks.
+///
+/// Each call is independent: it reads `sgp4` without changing it, so the same
+/// inputs always give the same state. Run time is constant except for 12-hour
+/// and 24-hour resonant deep-space orbits (for example GPS, Molniya, and GEO).
+/// For those, the resonance integrator steps from epoch in 720-minute steps on
+/// every call, so run time grows linearly with `|delta_t|`: about 60 steps at
+/// 30 days and about 73,000 at the 100-year limit. Callers with a timing budget,
+/// such as flight software, should bound element-set age to bound the
+/// worst-case run time.
 ///
 /// # Arguments
 /// * `sgp4` - Initialized propagator
