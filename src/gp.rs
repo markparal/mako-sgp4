@@ -154,8 +154,11 @@ pub enum GpError {
     /// A TLE data line is not 68 characters before the checksum
     InvalidTLELine,
 
-    /// TLE international designator launch number or piece exceeds 3 characters
+    /// TLE international designator launch number or piece exceeds 3 characters, or the designator is not printable ASCII
     InvalidTLEInternationalDesignator,
+
+    /// TLE name contains a character that is not printable ASCII
+    InvalidTLEName,
 
     /// An OMM field cannot be parsed as the requested type
     InvalidOmmField,
@@ -180,6 +183,12 @@ pub enum GpError {
 
     /// A floating-point GP field to be written is NaN or infinite
     NonFiniteValue,
+
+    /// OMM OBJECT_NAME or OBJECT_ID contains a control character
+    InvalidOmmText,
+
+    /// Classification is not a printable ASCII character
+    InvalidClassification,
 
     /// SGP4 initialization failed
     Sgp4(Sgp4Error),
@@ -230,8 +239,11 @@ impl fmt::Display for GpError {
                 f.write_str("a TLE data line is not 68 characters before the checksum")
             }
             GpError::InvalidTLEInternationalDesignator => f.write_str(
-                "TLE international designator launch number or piece exceeds 3 characters",
+                "TLE international designator launch number or piece exceeds 3 characters, or the designator is not printable ASCII",
             ),
+            GpError::InvalidTLEName => {
+                f.write_str("TLE name contains a character that is not printable ASCII")
+            }
             GpError::InvalidOmmField => {
                 f.write_str("an OMM field cannot be parsed as the requested type")
             }
@@ -247,6 +259,12 @@ impl fmt::Display for GpError {
             GpError::OmmCsvWrite => f.write_str("OMM CSV cannot be written"),
             GpError::NonFiniteValue => {
                 f.write_str("a floating-point GP field to be written is NaN or infinite")
+            }
+            GpError::InvalidOmmText => {
+                f.write_str("OMM OBJECT_NAME or OBJECT_ID contains a control character")
+            }
+            GpError::InvalidClassification => {
+                f.write_str("classification is not a printable ASCII character")
             }
             GpError::Sgp4(_) => f.write_str("SGP4 initialization failed"),
         }
@@ -973,12 +991,17 @@ fn format_tle_catalog_number(catalog: i32) -> Result<String, GpError> {
 /// * `Err(GpError)` - If the designator cannot be written as a TLE field
 ///
 /// # Errors
-/// * [`GpError::InvalidTLEInternationalDesignator`] - If the launch number or piece exceeds 3 characters
+/// * [`GpError::InvalidTLEInternationalDesignator`] - If the launch number or piece exceeds 3 characters, or the designator is not printable ASCII
 fn format_tle_intl_des(intl: &str) -> Result<String, GpError> {
     let intl = intl.trim();
     if intl.is_empty() {
         // Handle case where international designator is not present
         return Ok("        ".to_string());
+    }
+
+    // TLE fields are ASCII; lengths below are counted in bytes
+    if !intl.chars().all(|c| c.is_ascii_graphic()) {
+        return Err(GpError::InvalidTLEInternationalDesignator);
     }
 
     // Collapse YYYY-NNNP back to the two-digit TLE year plus the launch piece
@@ -1181,11 +1204,10 @@ fn format_tle_line1(gp: &GenPerturbElementSet) -> Result<String, GpError> {
     let catalog = format_tle_catalog_number(gp.satellite_catalog_number)?;
 
     // Classification
-    let classification = if gp.classification.is_ascii_graphic() {
-        gp.classification
-    } else {
-        'U'
-    };
+    if !gp.classification.is_ascii_graphic() {
+        return Err(GpError::InvalidClassification);
+    }
+    let classification = gp.classification;
 
     // International designator
     let intl_des = format_tle_intl_des(&gp.international_designator)?;
@@ -1303,7 +1325,8 @@ fn check_gp_finite(gp: &GenPerturbElementSet) -> Result<(), GpError> {
 /// Build one TLE from a general perturbation element set
 ///
 /// A name line (line 0) is written when [`GenPerturbElementSet::common_name`]
-/// is non-empty. Names longer than 24 characters are truncated. MEAN_MOTION
+/// is non-empty. Names must be printable ASCII, and names longer than 24
+/// characters are truncated. MEAN_MOTION
 /// derivatives are written as the TLE-printed values (stored derivatives
 /// divided by 2 and 6).
 ///
@@ -1317,8 +1340,11 @@ fn gp_to_tle(gp: &GenPerturbElementSet) -> Result<String, GpError> {
     check_gp_finite(gp)?;
     let mut tle = String::new();
 
-    // Optional name line (TLE line 0)
+    // Optional name line (TLE line 0), which must be printable ASCII
     let name = gp.common_name.trim();
+    if !name.chars().all(|c| (' '..='~').contains(&c)) {
+        return Err(GpError::InvalidTLEName);
+    }
     if !name.is_empty() {
         let mut name = name.to_string();
         if name.len() > 24 {
@@ -1354,9 +1380,11 @@ fn gp_to_tle(gp: &GenPerturbElementSet) -> Result<String, GpError> {
 ///
 /// # Errors
 /// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
+/// * [`GpError::InvalidTLEName`] - If a name contains a character that is not printable ASCII
+/// * [`GpError::InvalidClassification`] - If a classification is not a printable ASCII character
 /// * [`GpError::InvalidTLECatalogNumber`] - If a catalog number is negative or greater than 339999
 /// * [`GpError::InvalidTLEDateTime`] - If an epoch year is before 1957 or after 2056, or an epoch calendar date or time of day is invalid
-/// * [`GpError::InvalidTLEInternationalDesignator`] - If a launch number or piece exceeds 3 characters
+/// * [`GpError::InvalidTLEInternationalDesignator`] - If a launch number or piece exceeds 3 characters, or a designator is not printable ASCII
 /// * [`GpError::InvalidTLELine`] - If a formatted TLE data line is not 68 characters before the checksum
 ///
 /// # Examples
@@ -1409,9 +1437,11 @@ pub fn to_tle_string(sgp4s: &[Sgp4]) -> Result<String, GpError> {
 ///
 /// # Errors
 /// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
+/// * [`GpError::InvalidTLEName`] - If a name contains a character that is not printable ASCII
+/// * [`GpError::InvalidClassification`] - If a classification is not a printable ASCII character
 /// * [`GpError::InvalidTLECatalogNumber`] - If a catalog number is negative or greater than 339999
 /// * [`GpError::InvalidTLEDateTime`] - If an epoch year is before 1957 or after 2056, or an epoch calendar date or time of day is invalid
-/// * [`GpError::InvalidTLEInternationalDesignator`] - If a launch number or piece exceeds 3 characters
+/// * [`GpError::InvalidTLEInternationalDesignator`] - If a launch number or piece exceeds 3 characters, or a designator is not printable ASCII
 /// * [`GpError::InvalidTLELine`] - If a formatted TLE data line is not 68 characters before the checksum
 /// * [`GpError::Io`] - If the file cannot be written
 ///
@@ -1861,31 +1891,11 @@ fn trim_decimal_zeros(value: &str) -> String {
     trimmed.to_string()
 }
 
-/// Strip a leading zero before a decimal point
-///
-/// Celestrak OMM text uses `.00147468` rather than `0.00147468`. Whole
-/// numbers such as `0` are left unchanged.
-///
-/// # Arguments
-/// * `value` - A decimal number already formatted as text
-///
-/// # Returns
-/// * The number text without a leading zero before the decimal point
-fn strip_leading_decimal_zero(value: &str) -> String {
-    if let Some(rest) = value.strip_prefix("-0.") {
-        return format!("-.{}", rest);
-    }
-    if let Some(rest) = value.strip_prefix("0.") {
-        return format!(".{}", rest);
-    }
-    value.to_string()
-}
-
 /// Format an OMM decimal number
 ///
 /// Rounds to 12 decimal places to suppress binary float noise, then drops
-/// trailing zeros. Values between -1 and 1 are written without a leading
-/// zero (`.###`). Zero is written as `0`.
+/// trailing zeros. Values between -1 and 1 keep their leading zero
+/// (`0.###`). Zero is written as `0`.
 ///
 /// # Arguments
 /// * `value` - The number to format
@@ -1898,13 +1908,15 @@ fn format_omm_decimal(value: f64) -> String {
     }
 
     let rounded = round(value * 1e12) / 1e12;
-    strip_leading_decimal_zero(&trim_decimal_zeros(&format!("{:.12}", rounded)))
+    trim_decimal_zeros(&format!("{:.12}", rounded))
 }
 
 /// Format an OMM scientific-notation number
 ///
-/// Matches Celestrak style: a leading decimal mantissa and an explicit
-/// exponent sign, for example `.39221734E-3`. Zero is written as `0`.
+/// Writes a mantissa in [0.1, 1) with up to 10 significant digits and an
+/// explicit exponent sign, for example `0.39221734E-3`. Digits come from
+/// exact decimal formatting, so values of any magnitude round correctly.
+/// Zero is written as `0`.
 ///
 /// # Arguments
 /// * `value` - The number to format
@@ -1917,37 +1929,19 @@ fn format_omm_sci(value: f64) -> String {
         return "0".to_string();
     }
 
+    // Exact formatting with 10 significant digits, e.g. "3.922173400e-4"
     let sign = if value < 0.0 { "-" } else { "" };
-    let magnitude = abs(value);
+    let text = format!("{:.9e}", abs(value));
+    let (mantissa, exponent) = text.split_once('e').unwrap_or((text.as_str(), "0"));
 
-    // Mantissa in [0.1, 1) so the leading digit sits after the decimal point
-    let mut exp = floor(log10(magnitude)) as i32 + 1;
-    let mut mantissa = magnitude / powi(10f64, exp);
+    // Shift from a d.ddd mantissa to a 0.dddd mantissa
+    let exponent = exponent.parse::<i32>().unwrap_or(0) + 1;
+    let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
+    let digits = digits.trim_end_matches('0');
+    let digits = if digits.is_empty() { "0" } else { digits };
 
-    if mantissa >= 1.0 {
-        mantissa /= 10.0;
-        exp += 1;
-    } else if mantissa < 0.1 {
-        mantissa *= 10.0;
-        exp -= 1;
-    }
-
-    // 10 digits after the decimal, then drop trailing zeros
-    const SCALE: f64 = 10_000_000_000.0;
-    let mut digits = round(mantissa * SCALE) as i64;
-    if digits >= 10_000_000_000 {
-        exp += 1;
-        digits = 1_000_000_000;
-    }
-
-    let mut frac = format!("{:010}", digits);
-    frac = frac.trim_end_matches('0').to_string();
-    if frac.is_empty() {
-        frac = "0".to_string();
-    }
-
-    let exp_sign = if exp >= 0 { "+" } else { "-" };
-    format!("{}.{}E{}{}", sign, frac, exp_sign, exp.abs())
+    let exp_sign = if exponent >= 0 { "+" } else { "-" };
+    format!("{sign}0.{digits}E{exp_sign}{}", exponent.unsigned_abs())
 }
 
 /// Format an OMM EPOCH string from a UTC datetime
@@ -1983,18 +1977,48 @@ fn format_omm_epoch(epoch: &DateTime) -> Result<String, GpError> {
 
 /// Format a classification character for OMM export
 ///
-/// Non-printable values default to unclassified (`U`).
-///
 /// # Arguments
 /// * `classification` - The GP classification character
 ///
 /// # Returns
-/// * A single-character CLASSIFICATION_TYPE value
-fn format_omm_classification(classification: char) -> String {
-    if classification.is_ascii_graphic() {
-        return classification.to_string();
+/// * `Ok(String)` - A single-character CLASSIFICATION_TYPE value
+/// * `Err(GpError)` - If the classification is not printable ASCII
+///
+/// # Errors
+/// * [`GpError::InvalidClassification`] - If the classification is not a printable ASCII character
+fn format_omm_classification(classification: char) -> Result<String, GpError> {
+    if !classification.is_ascii_graphic() {
+        return Err(GpError::InvalidClassification);
     }
-    "U".to_string()
+    Ok(classification.to_string())
+}
+
+/// Check that the OMM text fields contain no control characters
+///
+/// A line break in OBJECT_NAME or OBJECT_ID would split a KVN record and
+/// could add a keyword, so every OMM writer rejects control characters.
+///
+/// # Arguments
+/// * `gp` - The element set to check
+///
+/// # Returns
+/// * `Ok(())` - If OBJECT_NAME and OBJECT_ID contain no control characters
+/// * `Err(GpError)` - If either contains a control character
+///
+/// # Errors
+/// * [`GpError::InvalidOmmText`] - If OBJECT_NAME or OBJECT_ID contains a control character
+fn check_omm_text(gp: &GenPerturbElementSet) -> Result<(), GpError> {
+    let fields = [
+        gp.common_name.as_str(),
+        gp.international_designator.as_str(),
+    ];
+    if fields
+        .iter()
+        .any(|field| field.chars().any(char::is_control))
+    {
+        return Err(GpError::InvalidOmmText);
+    }
+    Ok(())
 }
 
 /// Build one OMM KVN record from a general perturbation element set
@@ -2012,9 +2036,12 @@ fn format_omm_classification(classification: char) -> String {
 ///
 /// # Errors
 /// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
+/// * [`GpError::InvalidOmmText`] - If OBJECT_NAME or OBJECT_ID contains a control character
+/// * [`GpError::InvalidClassification`] - If a classification is not a printable ASCII character
 /// * [`GpError::InvalidOmmEpoch`] - If the epoch is not a valid datetime
 fn gp_to_omm_kvn(gp: &GenPerturbElementSet) -> Result<String, GpError> {
     check_gp_finite(gp)?;
+    check_omm_text(gp)?;
 
     // OMM MEAN_MOTION_DOT and MEAN_MOTION_DDOT are the TLE-printed values
     let mean_motion_dot = gp.first_derivative_of_mean_motion / 2.0;
@@ -2032,7 +2059,7 @@ fn gp_to_omm_kvn(gp: &GenPerturbElementSet) -> Result<String, GpError> {
         format_kvn_line("CENTER_NAME", "EARTH"),
         format_kvn_line("REF_FRAME", "TEME"),
         format_kvn_line("TIME_SYSTEM", "UTC"),
-        format_kvn_line("MEAN_ELEMENT_THEORY", "SGP/SGP4"),
+        format_kvn_line("MEAN_ELEMENT_THEORY", "SGP4"),
         String::new(),
         // Mean elements
         format_kvn_line("EPOCH", &format_omm_epoch(&gp.epoch_datetime)?),
@@ -2053,7 +2080,7 @@ fn gp_to_omm_kvn(gp: &GenPerturbElementSet) -> Result<String, GpError> {
         format_kvn_line("EPHEMERIS_TYPE", &gp.ephemeris_type.to_string()),
         format_kvn_line(
             "CLASSIFICATION_TYPE",
-            &format_omm_classification(gp.classification),
+            &format_omm_classification(gp.classification)?,
         ),
         format_kvn_line("NORAD_CAT_ID", &gp.satellite_catalog_number.to_string()),
         format_kvn_line("ELEMENT_SET_NO", &gp.element_set_number.to_string()),
@@ -2072,7 +2099,7 @@ fn gp_to_omm_kvn(gp: &GenPerturbElementSet) -> Result<String, GpError> {
 /// Each element set is written as one OMM record starting with
 /// `CCSDS_OMM_VERS`. Metadata fields that are not stored on
 /// [`GenPerturbElementSet`] are filled with SGP4 defaults: Earth-centered,
-/// TEME, UTC, and SGP/SGP4. CREATION_DATE and ORIGINATOR are left empty.
+/// TEME, UTC, and SGP4. CREATION_DATE and ORIGINATOR are left empty.
 /// OMM MEAN_MOTION_DOT and MEAN_MOTION_DDOT are the TLE-printed values
 /// (the stored derivatives divided by 2 and 6).
 ///
@@ -2087,6 +2114,8 @@ fn gp_to_omm_kvn(gp: &GenPerturbElementSet) -> Result<String, GpError> {
 ///
 /// # Errors
 /// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
+/// * [`GpError::InvalidOmmText`] - If OBJECT_NAME or OBJECT_ID contains a control character
+/// * [`GpError::InvalidClassification`] - If a classification is not a printable ASCII character
 /// * [`GpError::InvalidOmmEpoch`] - If an epoch calendar date or time of day is invalid
 ///
 /// # Examples
@@ -2151,6 +2180,8 @@ pub fn to_omm_kvn_string(sgp4s: &[Sgp4]) -> Result<String, GpError> {
 ///
 /// # Errors
 /// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
+/// * [`GpError::InvalidOmmText`] - If OBJECT_NAME or OBJECT_ID contains a control character
+/// * [`GpError::InvalidClassification`] - If a classification is not a printable ASCII character
 /// * [`GpError::InvalidOmmEpoch`] - If an epoch calendar date or time of day is invalid
 /// * [`GpError::Io`] - If the file cannot be written
 ///
@@ -2473,10 +2504,13 @@ fn format_xml_tag(name: &str, value: &str) -> String {
 ///
 /// # Errors
 /// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
+/// * [`GpError::InvalidOmmText`] - If OBJECT_NAME or OBJECT_ID contains a control character
+/// * [`GpError::InvalidClassification`] - If a classification is not a printable ASCII character
 /// * [`GpError::InvalidOmmEpoch`] - If the epoch is not a valid datetime
 #[cfg(feature = "xml")]
 fn gp_to_omm_xml(gp: &GenPerturbElementSet) -> Result<String, GpError> {
     check_gp_finite(gp)?;
+    check_omm_text(gp)?;
 
     // OMM MEAN_MOTION_DOT and MEAN_MOTION_DDOT are the TLE-printed values
     let mean_motion_dot = gp.first_derivative_of_mean_motion / 2.0;
@@ -2527,7 +2561,7 @@ fn gp_to_omm_xml(gp: &GenPerturbElementSet) -> Result<String, GpError> {
     ));
     xml.push_str(&format_xml_tag(
         "CLASSIFICATION_TYPE",
-        &format_omm_classification(gp.classification),
+        &format_omm_classification(gp.classification)?,
     ));
     xml.push_str(&format_xml_tag(
         "NORAD_CAT_ID",
@@ -2576,6 +2610,8 @@ fn gp_to_omm_xml(gp: &GenPerturbElementSet) -> Result<String, GpError> {
 ///
 /// # Errors
 /// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
+/// * [`GpError::InvalidOmmText`] - If OBJECT_NAME or OBJECT_ID contains a control character
+/// * [`GpError::InvalidClassification`] - If a classification is not a printable ASCII character
 /// * [`GpError::InvalidOmmEpoch`] - If an epoch calendar date or time of day is invalid
 ///
 /// # Examples
@@ -2652,6 +2688,8 @@ pub fn to_omm_xml_string(sgp4s: &[Sgp4]) -> Result<String, GpError> {
 ///
 /// # Errors
 /// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
+/// * [`GpError::InvalidOmmText`] - If OBJECT_NAME or OBJECT_ID contains a control character
+/// * [`GpError::InvalidClassification`] - If a classification is not a printable ASCII character
 /// * [`GpError::InvalidOmmEpoch`] - If an epoch calendar date or time of day is invalid
 /// * [`GpError::Io`] - If the file cannot be written
 ///
@@ -2926,9 +2964,9 @@ pub fn from_omm_json_file(omm_json_file_path: &str) -> Result<Vec<Sgp4>, GpError
 
 /// Format an OMM number as a JSON numeric literal
 ///
-/// JSON requires a digit before the decimal point, so this does not use
-/// Celestrak KVN scientific notation or a leading-dot fraction. Zero is
-/// written as `0`.
+/// Rounds to 12 significant digits to suppress binary float noise without
+/// losing digits on small values, then writes the shortest JSON number that
+/// round-trips. Zero is written as `0`.
 ///
 /// # Arguments
 /// * `value` - The number to format
@@ -2945,7 +2983,9 @@ fn format_omm_json_number(value: f64) -> Result<String, GpError> {
         return Ok("0".to_string());
     }
 
-    let rounded = round(value * 1e12) / 1e12;
+    let rounded: f64 = format!("{:.11e}", value)
+        .parse()
+        .map_err(|_| GpError::NonFiniteValue)?;
     serde_json::Number::from_f64(rounded)
         .map(|n| n.to_string())
         .ok_or(GpError::NonFiniteValue)
@@ -2967,11 +3007,14 @@ fn format_omm_json_number(value: f64) -> Result<String, GpError> {
 ///
 /// # Errors
 /// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
+/// * [`GpError::InvalidOmmText`] - If OBJECT_NAME or OBJECT_ID contains a control character
+/// * [`GpError::InvalidClassification`] - If a classification is not a printable ASCII character
 /// * [`GpError::InvalidOmmEpoch`] - If the epoch is not a valid datetime
 /// * [`GpError::OmmJsonWrite`] - If a string field cannot be serialized
 #[cfg(feature = "json")]
 fn gp_to_omm_json(gp: &GenPerturbElementSet) -> Result<String, GpError> {
     check_gp_finite(gp)?;
+    check_omm_text(gp)?;
 
     // OMM MEAN_MOTION_DOT and MEAN_MOTION_DDOT are the TLE-printed values
     let mean_motion_dot = gp.first_derivative_of_mean_motion / 2.0;
@@ -3019,7 +3062,7 @@ fn gp_to_omm_json(gp: &GenPerturbElementSet) -> Result<String, GpError> {
         format!("        \"EPHEMERIS_TYPE\": {}", gp.ephemeris_type),
         format!(
             "        \"CLASSIFICATION_TYPE\": {}",
-            serde_json::to_string(&format_omm_classification(gp.classification))
+            serde_json::to_string(&format_omm_classification(gp.classification)?)
                 .map_err(|_| GpError::OmmJsonWrite)?
         ),
         format!("        \"NORAD_CAT_ID\": {}", gp.satellite_catalog_number),
@@ -3061,6 +3104,8 @@ fn gp_to_omm_json(gp: &GenPerturbElementSet) -> Result<String, GpError> {
 ///
 /// # Errors
 /// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
+/// * [`GpError::InvalidOmmText`] - If OBJECT_NAME or OBJECT_ID contains a control character
+/// * [`GpError::InvalidClassification`] - If a classification is not a printable ASCII character
 /// * [`GpError::InvalidOmmEpoch`] - If an epoch calendar date or time of day is invalid
 /// * [`GpError::OmmJsonWrite`] - If a string field cannot be serialized
 ///
@@ -3133,6 +3178,8 @@ pub fn to_omm_json_string(sgp4s: &[Sgp4]) -> Result<String, GpError> {
 ///
 /// # Errors
 /// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
+/// * [`GpError::InvalidOmmText`] - If OBJECT_NAME or OBJECT_ID contains a control character
+/// * [`GpError::InvalidClassification`] - If a classification is not a printable ASCII character
 /// * [`GpError::InvalidOmmEpoch`] - If an epoch calendar date or time of day is invalid
 /// * [`GpError::OmmJsonWrite`] - If a string field cannot be serialized
 /// * [`GpError::Io`] - If the file cannot be written
@@ -3376,10 +3423,13 @@ pub fn from_omm_csv_file(omm_csv_file_path: &str) -> Result<Vec<Sgp4>, GpError> 
 ///
 /// # Errors
 /// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
+/// * [`GpError::InvalidOmmText`] - If OBJECT_NAME or OBJECT_ID contains a control character
+/// * [`GpError::InvalidClassification`] - If a classification is not a printable ASCII character
 /// * [`GpError::InvalidOmmEpoch`] - If the epoch is not a valid datetime
 #[cfg(feature = "csv")]
 fn gp_to_omm_csv_row(gp: &GenPerturbElementSet) -> Result<[String; 17], GpError> {
     check_gp_finite(gp)?;
+    check_omm_text(gp)?;
 
     // OMM MEAN_MOTION_DOT and MEAN_MOTION_DDOT are the TLE-printed values
     let mean_motion_dot = gp.first_derivative_of_mean_motion / 2.0;
@@ -3396,7 +3446,7 @@ fn gp_to_omm_csv_row(gp: &GenPerturbElementSet) -> Result<[String; 17], GpError>
         format_omm_decimal(gp.argument_of_perigee),
         format_omm_decimal(gp.mean_anomaly),
         gp.ephemeris_type.to_string(),
-        format_omm_classification(gp.classification),
+        format_omm_classification(gp.classification)?,
         gp.satellite_catalog_number.to_string(),
         gp.element_set_number.to_string(),
         gp.revolution_number_at_epoch.to_string(),
@@ -3423,6 +3473,8 @@ fn gp_to_omm_csv_row(gp: &GenPerturbElementSet) -> Result<[String; 17], GpError>
 ///
 /// # Errors
 /// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
+/// * [`GpError::InvalidOmmText`] - If OBJECT_NAME or OBJECT_ID contains a control character
+/// * [`GpError::InvalidClassification`] - If a classification is not a printable ASCII character
 /// * [`GpError::InvalidOmmEpoch`] - If an epoch calendar date or time of day is invalid
 /// * [`GpError::OmmCsvWrite`] - If the in-memory CSV writer fails
 ///
@@ -3483,6 +3535,8 @@ pub fn to_omm_csv_string(sgp4s: &[Sgp4]) -> Result<String, GpError> {
 ///
 /// # Errors
 /// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
+/// * [`GpError::InvalidOmmText`] - If OBJECT_NAME or OBJECT_ID contains a control character
+/// * [`GpError::InvalidClassification`] - If a classification is not a printable ASCII character
 /// * [`GpError::InvalidOmmEpoch`] - If an epoch calendar date or time of day is invalid
 /// * [`GpError::OmmCsvWrite`] - If the in-memory CSV writer fails
 /// * [`GpError::Io`] - If the file cannot be written
@@ -3753,6 +3807,131 @@ mod tests {
             boxed(GpError::NonFiniteValue).unwrap_err().to_string(),
             "a floating-point GP field to be written is NaN or infinite"
         );
+    }
+
+    /// Format OMM numbers with leading zeros and full significant digits
+    ///
+    /// # Panics
+    /// * If a formatted number differs from the expected text
+    #[test]
+    fn test_format_omm_numbers() {
+        // Decimals keep the leading zero
+        assert_eq!(format_omm_decimal(0.0006703), "0.0006703");
+        assert_eq!(format_omm_decimal(-0.5), "-0.5");
+        assert_eq!(format_omm_decimal(15.72125391), "15.72125391");
+        assert_eq!(format_omm_decimal(0.0), "0");
+
+        // Scientific notation keeps a 0.d mantissa at any magnitude
+        assert_eq!(format_omm_sci(3.9221734e-4), "0.39221734E-3");
+        assert_eq!(format_omm_sci(-1.1606e-5), "-0.11606E-4");
+        assert_eq!(format_omm_sci(1.2345000000000002e-10), "0.12345E-9");
+        assert_eq!(format_omm_sci(0.5), "0.5E+0");
+        assert_eq!(format_omm_sci(9.99999999999e-5), "0.1E-3");
+        assert_eq!(format_omm_sci(5e-324), "0.4940656458E-323");
+        assert_eq!(format_omm_sci(0.0), "0");
+
+        // JSON rounds to significant digits, not decimal places
+        #[cfg(feature = "json")]
+        {
+            assert_eq!(
+                format_omm_json_number(1.2345000000000002e-10),
+                Ok("1.2345e-10".to_string())
+            );
+            assert_eq!(
+                format_omm_json_number(15.72125391),
+                Ok("15.72125391".to_string())
+            );
+            assert_eq!(format_omm_json_number(0.0), Ok("0".to_string()));
+        }
+
+        // KVN and XML agree on the mean element theory
+        let sgp4s = from_tle_string(
+            "\
+1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921
+2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537
+",
+        )
+        .expect("ISS TLE should parse");
+        let kvn = to_omm_kvn_string(&sgp4s).expect("KVN should be written");
+        assert!(kvn.contains("MEAN_ELEMENT_THEORY = SGP4\n"), "{kvn}");
+        #[cfg(feature = "xml")]
+        {
+            let xml = to_omm_xml_string(&sgp4s).expect("XML should be written");
+            assert!(xml.contains("<MEAN_ELEMENT_THEORY>SGP4</MEAN_ELEMENT_THEORY>"));
+        }
+    }
+
+    /// Reject names, designators, and classifications that cannot be written safely
+    ///
+    /// # Panics
+    /// * If a writer accepts an unsafe text field or panics
+    #[test]
+    fn test_export_rejects_bad_text() {
+        let tle = "\
+ISS (ZARYA)
+1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921
+2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537
+";
+        let with = |set: &dyn Fn(&mut GenPerturbElementSet)| {
+            let mut sgp4s = from_tle_string(tle).expect("ISS TLE should parse");
+            set(&mut sgp4s[0].gp);
+            sgp4s
+        };
+
+        // TLE names must be printable ASCII, including the 24-byte cut point
+        for name in [
+            "a\u{c5}\u{c5}\u{c5}\u{c5}\u{c5}\u{c5}\u{c5}\u{c5}\u{c5}\u{c5}\u{c5}\u{c5}",
+            "ONE\nTWO",
+            "TAB\tNAME",
+        ] {
+            let sgp4s = with(&|gp| gp.common_name = name.to_string());
+            assert_eq!(
+                to_tle_string(&sgp4s),
+                Err(GpError::InvalidTLEName),
+                "{name:?}"
+            );
+        }
+
+        // Long ASCII names are still truncated to 24 characters
+        let sgp4s = with(&|gp| gp.common_name = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".to_string());
+        let exported = to_tle_string(&sgp4s).expect("long ASCII name should be written");
+        assert_eq!(exported.lines().next(), Some("ABCDEFGHIJKLMNOPQRSTUVWX"));
+
+        // TLE international designators must be printable ASCII
+        let sgp4s = with(&|gp| gp.international_designator = "1998-067\u{c5}".to_string());
+        assert_eq!(
+            to_tle_string(&sgp4s),
+            Err(GpError::InvalidTLEInternationalDesignator)
+        );
+
+        // Control characters in OMM text fields are rejected by every OMM writer
+        let bad_text: [fn(&mut GenPerturbElementSet); 2] = [
+            |gp| gp.common_name = "ONE\nTWO = 3".to_string(),
+            |gp| gp.international_designator = "1998-067A\t".to_string(),
+        ];
+        for set in bad_text {
+            let sgp4s = with(&set);
+            let expected = Err(GpError::InvalidOmmText);
+            assert_eq!(to_omm_kvn_string(&sgp4s), expected);
+            #[cfg(feature = "xml")]
+            assert_eq!(to_omm_xml_string(&sgp4s), expected);
+            #[cfg(feature = "json")]
+            assert_eq!(to_omm_json_string(&sgp4s), expected);
+            #[cfg(feature = "csv")]
+            assert_eq!(to_omm_csv_string(&sgp4s), expected);
+        }
+
+        // An unprintable classification is rejected rather than relabeled
+        let sgp4s = with(&|gp| gp.classification = '\u{7}');
+        let expected = Err(GpError::InvalidClassification);
+        assert_eq!(to_tle_string(&sgp4s), expected);
+        assert_eq!(to_omm_kvn_string(&sgp4s), expected);
+        #[cfg(feature = "xml")]
+        assert_eq!(to_omm_xml_string(&sgp4s), expected);
+        #[cfg(feature = "json")]
+        assert_eq!(to_omm_json_string(&sgp4s), expected);
+        #[cfg(feature = "csv")]
+        assert_eq!(to_omm_csv_string(&sgp4s), expected);
     }
 
     /// Write OMM epochs that round up to a whole minute as the next minute
