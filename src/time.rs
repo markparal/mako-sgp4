@@ -8,7 +8,7 @@
 // ------------------
 // Internal Libraries
 // ------------------
-use crate::math::floor;
+use crate::math::{floor, round};
 
 // -------
 // Structs
@@ -246,6 +246,55 @@ fn days_in_month(year: i32, month: i32) -> i32 {
         2 => 28,
         _ => 0,
     }
+}
+
+/// Round a datetime's seconds to whole microseconds, carrying into the larger fields
+///
+/// A second that rounds up to 60 (or to 61 inside a leap second) becomes
+/// second 0 of the next minute, carrying into the hour, day, month, and year
+/// as needed. Leap seconds that do not round up are kept as second 60.
+///
+/// # Arguments
+/// * `datetime` - A datetime that passes [`validate_datetime`]
+///
+/// # Returns
+/// * `Some((DateTime, i64))` - The datetime with `second` set to its whole seconds, and the microseconds within that second
+/// * `None` - If carrying would overflow the year
+pub(crate) fn round_to_microseconds(datetime: &DateTime) -> Option<(DateTime, i64)> {
+    let mut rounded = *datetime;
+
+    // A leap second runs to 61 seconds, any other minute to 60
+    let minute_micros: i64 = if datetime.second >= 60.0 {
+        61_000_000
+    } else {
+        60_000_000
+    };
+    let mut micros = round(datetime.second * 1e6) as i64;
+
+    // Carry a rounded-up minute into the larger fields
+    if micros >= minute_micros {
+        micros -= minute_micros;
+        rounded.minute += 1;
+        if rounded.minute == 60 {
+            rounded.minute = 0;
+            rounded.hour += 1;
+        }
+        if rounded.hour == 24 {
+            rounded.hour = 0;
+            rounded.day += 1;
+        }
+        if rounded.day > days_in_month(rounded.year, rounded.month) {
+            rounded.day = 1;
+            rounded.month += 1;
+        }
+        if rounded.month == 13 {
+            rounded.month = 1;
+            rounded.year = rounded.year.checked_add(1)?;
+        }
+    }
+
+    rounded.second = (micros / 1_000_000) as f64;
+    Some((rounded, micros % 1_000_000))
 }
 
 /// Convert a datetime in UTC to Julian date (JD) format.
@@ -559,6 +608,88 @@ pub fn dayofyr2utc(year: i32, dayofyr: f64) -> Result<DateTime, DateError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Round seconds to microseconds and carry a rounded-up minute
+    ///
+    /// # Panics
+    /// * If a carried field or the microseconds differ from the expected value
+    #[test]
+    fn test_round_to_microseconds() {
+        let dt = |year, month, day, hour, minute, second| DateTime {
+            year,
+            month,
+            day,
+            hour,
+            minute,
+            second,
+            timezone: Timezone::UTC,
+        };
+        let cases = [
+            // No carry
+            (
+                dt(2008, 9, 20, 12, 25, 40.104192),
+                (2008, 9, 20, 12, 25, 40.0),
+                104_192,
+            ),
+            // Minute, day, month, leap-day, and year carries
+            (
+                dt(2008, 9, 20, 12, 25, 59.9999999),
+                (2008, 9, 20, 12, 26, 0.0),
+                0,
+            ),
+            (
+                dt(2008, 9, 20, 23, 59, 59.9999999),
+                (2008, 9, 21, 0, 0, 0.0),
+                0,
+            ),
+            (
+                dt(2009, 2, 28, 23, 59, 59.9999999),
+                (2009, 3, 1, 0, 0, 0.0),
+                0,
+            ),
+            (
+                dt(2008, 2, 28, 23, 59, 59.9999999),
+                (2008, 2, 29, 0, 0, 0.0),
+                0,
+            ),
+            (
+                dt(2008, 12, 31, 23, 59, 59.9999999),
+                (2009, 1, 1, 0, 0, 0.0),
+                0,
+            ),
+            // Leap seconds stay as second 60 unless they round up
+            (
+                dt(2016, 12, 31, 23, 59, 60.5),
+                (2016, 12, 31, 23, 59, 60.0),
+                500_000,
+            ),
+            (
+                dt(2016, 12, 31, 23, 59, 60.9999999),
+                (2017, 1, 1, 0, 0, 0.0),
+                0,
+            ),
+        ];
+        for (input, (year, month, day, hour, minute, second), micros) in cases {
+            let (rounded, rounded_micros) =
+                round_to_microseconds(&input).expect("year should not overflow");
+            assert_eq!(
+                (
+                    rounded.year,
+                    rounded.month,
+                    rounded.day,
+                    rounded.hour,
+                    rounded.minute,
+                    rounded.second
+                ),
+                (year, month, day, hour, minute, second),
+                "{input:?}"
+            );
+            assert_eq!(rounded_micros, micros, "{input:?}");
+        }
+
+        // Carrying past the last representable year is rejected
+        assert!(round_to_microseconds(&dt(i32::MAX, 12, 31, 23, 59, 59.9999999)).is_none());
+    }
 
     /// Validate calendar and clock ranges
     ///

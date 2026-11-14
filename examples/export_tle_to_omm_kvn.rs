@@ -40,7 +40,7 @@ fn main() {
     let tle_sgp4s = from_tle_string(tle_string).unwrap();
 
     // Export the GP data from the SGP4 propagator to an OMM-KVN string
-    let omm_kvn = to_omm_kvn_string(&tle_sgp4s);
+    let omm_kvn = to_omm_kvn_string(&tle_sgp4s).unwrap();
 
     // Print the result
     println!("{}", omm_kvn);

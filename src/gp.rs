@@ -31,7 +31,7 @@ use csv::{ReaderBuilder, WriterBuilder};
 // ------------------
 use crate::math::{abs, floor, log10, powi, round};
 use crate::sgp4::{Sgp4, Sgp4Error, init_sgp4};
-use crate::time::{DateTime, Timezone, dayofyr2utc, validate_datetime};
+use crate::time::{DateTime, Timezone, dayofyr2utc, round_to_microseconds, validate_datetime};
 
 // -------
 // Structs
@@ -159,7 +159,7 @@ pub enum GpError {
     /// An OMM field cannot be parsed as the requested type
     InvalidOmmField,
 
-    /// OMM EPOCH cannot be parsed as a UTC datetime
+    /// OMM EPOCH cannot be parsed or written as a valid UTC datetime
     InvalidOmmEpoch,
 
     /// OMM XML document cannot be parsed
@@ -176,6 +176,9 @@ pub enum GpError {
 
     /// OMM CSV cannot be written
     OmmCsvWrite,
+
+    /// A floating-point GP field to be written is NaN or infinite
+    NonFiniteValue,
 
     /// SGP4 initialization failed
     Sgp4(Sgp4Error),
@@ -1192,6 +1195,36 @@ fn format_tle_line2(gp: &GenPerturbElementSet) -> Result<String, GpError> {
     tle_line_with_checksum(&line68)
 }
 
+/// Check that every floating-point GP field is finite before writing it
+///
+/// # Arguments
+/// * `gp` - The element set to check
+///
+/// # Returns
+/// * `Ok(())` - If every floating-point field is finite
+/// * `Err(GpError)` - If a field is NaN or infinite
+///
+/// # Errors
+/// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
+fn check_gp_finite(gp: &GenPerturbElementSet) -> Result<(), GpError> {
+    let values = [
+        gp.first_derivative_of_mean_motion,
+        gp.second_derivative_of_mean_motion,
+        gp.bstar,
+        gp.inclination,
+        gp.right_ascension_of_ascending_node,
+        gp.eccentricity,
+        gp.argument_of_perigee,
+        gp.mean_anomaly,
+        gp.mean_motion,
+    ];
+    if values.iter().all(|value| value.is_finite()) {
+        Ok(())
+    } else {
+        Err(GpError::NonFiniteValue)
+    }
+}
+
 /// Build one TLE from a general perturbation element set
 ///
 /// A name line (line 0) is written when [`GenPerturbElementSet::common_name`]
@@ -1206,6 +1239,7 @@ fn format_tle_line2(gp: &GenPerturbElementSet) -> Result<String, GpError> {
 /// * `Ok(String)` - One TLE in 2-line or 3-line format, including a trailing newline
 /// * `Err(GpError)` - If a TLE field cannot be written
 fn gp_to_tle(gp: &GenPerturbElementSet) -> Result<String, GpError> {
+    check_gp_finite(gp)?;
     let mut tle = String::new();
 
     // Optional name line (TLE line 0)
@@ -1244,6 +1278,7 @@ fn gp_to_tle(gp: &GenPerturbElementSet) -> Result<String, GpError> {
 /// * `Err(GpError)` - If a TLE field cannot be written
 ///
 /// # Errors
+/// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
 /// * [`GpError::InvalidTLECatalogNumber`] - If a catalog number is negative or greater than 339999
 /// * [`GpError::InvalidTLEDateTime`] - If an epoch year is before 1957 or after 2056, or an epoch calendar date or time of day is invalid
 /// * [`GpError::InvalidTLEInternationalDesignator`] - If a launch number or piece exceeds 3 characters
@@ -1298,6 +1333,7 @@ pub fn to_tle_string(sgp4s: &[Sgp4]) -> Result<String, GpError> {
 /// * `Err(GpError)` - If a TLE field cannot be written or the file cannot be written
 ///
 /// # Errors
+/// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
 /// * [`GpError::InvalidTLECatalogNumber`] - If a catalog number is negative or greater than 339999
 /// * [`GpError::InvalidTLEDateTime`] - If an epoch year is before 1957 or after 2056, or an epoch calendar date or time of day is invalid
 /// * [`GpError::InvalidTLEInternationalDesignator`] - If a launch number or piece exceeds 3 characters
@@ -1842,25 +1878,32 @@ fn format_omm_sci(value: f64) -> String {
 /// Format an OMM EPOCH string from a UTC datetime
 ///
 /// Writes `YYYY-MM-DDTHH:MM:SS.ssssss` with six fractional-second digits.
+/// Seconds are rounded to the microsecond, and a second that rounds up to 60
+/// carries into the next minute. A leap second is written as second 60.
 ///
 /// # Arguments
 /// * `epoch` - The epoch datetime
 ///
 /// # Returns
-/// * The EPOCH value in CCSDS calendar form
-fn format_omm_epoch(epoch: &DateTime) -> String {
-    let mut second = epoch.second;
-    if second < 0.0 {
-        second = 0.0;
-    }
-    if second >= 60.0 {
-        second = 59.999999;
-    }
+/// * `Ok(String)` - The EPOCH value in CCSDS calendar form
+/// * `Err(GpError)` - If the epoch is not a valid datetime
+///
+/// # Errors
+/// * [`GpError::InvalidOmmEpoch`] - If the calendar date or time of day is invalid
+fn format_omm_epoch(epoch: &DateTime) -> Result<String, GpError> {
+    validate_datetime(epoch).map_err(|_| GpError::InvalidOmmEpoch)?;
+    let (rounded, micros) = round_to_microseconds(epoch).ok_or(GpError::InvalidOmmEpoch)?;
 
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:09.6}",
-        epoch.year, epoch.month, epoch.day, epoch.hour, epoch.minute, second
-    )
+    Ok(format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:06}",
+        rounded.year,
+        rounded.month,
+        rounded.day,
+        rounded.hour,
+        rounded.minute,
+        rounded.second as i64,
+        micros
+    ))
 }
 
 /// Format a classification character for OMM export
@@ -1889,13 +1932,20 @@ fn format_omm_classification(classification: char) -> String {
 /// * `gp` - The element set to serialize
 ///
 /// # Returns
-/// * One OMM record in KVN format, including a trailing newline
-fn gp_to_omm_kvn(gp: &GenPerturbElementSet) -> String {
+/// * `Ok(String)` - One OMM record in KVN format, including a trailing newline
+/// * `Err(GpError)` - If a field cannot be written
+///
+/// # Errors
+/// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
+/// * [`GpError::InvalidOmmEpoch`] - If the epoch is not a valid datetime
+fn gp_to_omm_kvn(gp: &GenPerturbElementSet) -> Result<String, GpError> {
+    check_gp_finite(gp)?;
+
     // OMM MEAN_MOTION_DOT and MEAN_MOTION_DDOT are the TLE-printed values
     let mean_motion_dot = gp.first_derivative_of_mean_motion / 2.0;
     let mean_motion_ddot = gp.second_derivative_of_mean_motion / 6.0;
 
-    vec![
+    Ok(vec![
         // Header
         format_kvn_line("CCSDS_OMM_VERS", "2.0"),
         format_kvn_line("CREATION_DATE", ""),
@@ -1910,7 +1960,7 @@ fn gp_to_omm_kvn(gp: &GenPerturbElementSet) -> String {
         format_kvn_line("MEAN_ELEMENT_THEORY", "SGP/SGP4"),
         String::new(),
         // Mean elements
-        format_kvn_line("EPOCH", &format_omm_epoch(&gp.epoch_datetime)),
+        format_kvn_line("EPOCH", &format_omm_epoch(&gp.epoch_datetime)?),
         format_kvn_line("MEAN_MOTION", &format_omm_decimal(gp.mean_motion)),
         format_kvn_line("ECCENTRICITY", &format_omm_decimal(gp.eccentricity)),
         format_kvn_line("INCLINATION", &format_omm_decimal(gp.inclination)),
@@ -1939,7 +1989,7 @@ fn gp_to_omm_kvn(gp: &GenPerturbElementSet) -> String {
         // Trailing newline so concatenated records split on CCSDS_OMM_VERS
         String::new(),
     ]
-    .join("\n")
+    .join("\n"))
 }
 
 /// Builds a CCSDS KVN OMM string from a slice of [`Sgp4`] structs.
@@ -1957,7 +2007,12 @@ fn gp_to_omm_kvn(gp: &GenPerturbElementSet) -> String {
 /// * `sgp4s` - The SGP4 structs to export
 ///
 /// # Returns
-/// * `String` - One or more OMM records in KVN format
+/// * `Ok(String)` - One or more OMM records in KVN format
+/// * `Err(GpError)` - If a field cannot be written
+///
+/// # Errors
+/// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
+/// * [`GpError::InvalidOmmEpoch`] - If an epoch calendar date or time of day is invalid
 ///
 /// # Examples
 /// ```rust
@@ -1983,7 +2038,7 @@ fn gp_to_omm_kvn(gp: &GenPerturbElementSet) -> String {
 ///
 /// // Parse, export, and parse again
 /// let sgp4s = from_omm_kvn_string(omm).unwrap();
-/// let exported = to_omm_kvn_string(&sgp4s);
+/// let exported = to_omm_kvn_string(&sgp4s).unwrap();
 /// let reparsed = from_omm_kvn_string(&exported).unwrap();
 ///
 /// // Assert the round-trip catalog number and name
@@ -1996,14 +2051,14 @@ fn gp_to_omm_kvn(gp: &GenPerturbElementSet) -> String {
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
-pub fn to_omm_kvn_string(sgp4s: &[Sgp4]) -> String {
+pub fn to_omm_kvn_string(sgp4s: &[Sgp4]) -> Result<String, GpError> {
     // Serialize each element set as one KVN record
     let mut records = String::new();
     for sgp4 in sgp4s {
-        records.push_str(&gp_to_omm_kvn(&sgp4.gp));
+        records.push_str(&gp_to_omm_kvn(&sgp4.gp)?);
     }
 
-    records
+    Ok(records)
 }
 
 /// Writes a CCSDS KVN OMM file from a slice of [`Sgp4`] structs.
@@ -2017,9 +2072,11 @@ pub fn to_omm_kvn_string(sgp4s: &[Sgp4]) -> String {
 ///
 /// # Returns
 /// * `Ok(())` - If the file is written
-/// * `Err(GpError)` - If the file cannot be written
+/// * `Err(GpError)` - If a field cannot be written or the file cannot be written
 ///
 /// # Errors
+/// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
+/// * [`GpError::InvalidOmmEpoch`] - If an epoch calendar date or time of day is invalid
 /// * [`GpError::Io`] - If the file cannot be written
 ///
 /// # Examples
@@ -2069,7 +2126,7 @@ pub fn to_omm_kvn_string(sgp4s: &[Sgp4]) -> String {
 #[cfg(feature = "std")]
 pub fn to_omm_kvn_file(sgp4s: &[Sgp4], omm_kvn_file_path: &str) -> Result<(), GpError> {
     // Serialize the element sets and write the KVN file
-    let omm_kvn_string = to_omm_kvn_string(sgp4s);
+    let omm_kvn_string = to_omm_kvn_string(sgp4s)?;
     fs::write(omm_kvn_file_path, omm_kvn_string).map_err(|err| GpError::Io(err.to_string()))?;
     Ok(())
 }
@@ -2336,9 +2393,16 @@ fn format_xml_tag(name: &str, value: &str) -> String {
 /// * `gp` - The element set to serialize
 ///
 /// # Returns
-/// * One `omm` element, including a trailing newline
+/// * `Ok(String)` - One `omm` element, including a trailing newline
+/// * `Err(GpError)` - If a field cannot be written
+///
+/// # Errors
+/// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
+/// * [`GpError::InvalidOmmEpoch`] - If the epoch is not a valid datetime
 #[cfg(feature = "xml")]
-fn gp_to_omm_xml(gp: &GenPerturbElementSet) -> String {
+fn gp_to_omm_xml(gp: &GenPerturbElementSet) -> Result<String, GpError> {
+    check_gp_finite(gp)?;
+
     // OMM MEAN_MOTION_DOT and MEAN_MOTION_DDOT are the TLE-printed values
     let mean_motion_dot = gp.first_derivative_of_mean_motion / 2.0;
     let mean_motion_ddot = gp.second_derivative_of_mean_motion / 6.0;
@@ -2355,7 +2419,7 @@ fn gp_to_omm_xml(gp: &GenPerturbElementSet) -> String {
     xml.push_str("</metadata><data><meanElements>");
     xml.push_str(&format_xml_tag(
         "EPOCH",
-        &format_omm_epoch(&gp.epoch_datetime),
+        &format_omm_epoch(&gp.epoch_datetime)?,
     ));
     xml.push_str(&format_xml_tag(
         "MEAN_MOTION",
@@ -2413,7 +2477,7 @@ fn gp_to_omm_xml(gp: &GenPerturbElementSet) -> String {
     ));
     xml.push_str("</tleParameters></data></segment></body></omm>\n");
 
-    xml
+    Ok(xml)
 }
 
 /// Builds a CCSDS XML OMM string from a slice of [`Sgp4`] structs.
@@ -2432,7 +2496,12 @@ fn gp_to_omm_xml(gp: &GenPerturbElementSet) -> String {
 /// * `sgp4s` - The SGP4 structs to export
 ///
 /// # Returns
-/// * `String` - An NDM XML document containing one or more OMM records
+/// * `Ok(String)` - An NDM XML document containing one or more OMM records
+/// * `Err(GpError)` - If a field cannot be written
+///
+/// # Errors
+/// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
+/// * [`GpError::InvalidOmmEpoch`] - If an epoch calendar date or time of day is invalid
 ///
 /// # Examples
 /// ```rust
@@ -2464,7 +2533,7 @@ fn gp_to_omm_xml(gp: &GenPerturbElementSet) -> String {
 ///
 /// // Parse, export, and parse again
 /// let sgp4s = from_omm_xml_string(omm).unwrap();
-/// let exported = to_omm_xml_string(&sgp4s);
+/// let exported = to_omm_xml_string(&sgp4s).unwrap();
 /// let reparsed = from_omm_xml_string(&exported).unwrap();
 ///
 /// // Assert the round-trip catalog number and name
@@ -2478,7 +2547,7 @@ fn gp_to_omm_xml(gp: &GenPerturbElementSet) -> String {
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
 #[cfg(feature = "xml")]
-pub fn to_omm_xml_string(sgp4s: &[Sgp4]) -> String {
+pub fn to_omm_xml_string(sgp4s: &[Sgp4]) -> Result<String, GpError> {
     // Wrap all records in an NDM document with the CCSDS schema location
     let mut xml = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
@@ -2486,11 +2555,11 @@ pub fn to_omm_xml_string(sgp4s: &[Sgp4]) -> String {
          xsi:noNamespaceSchemaLocation=\"https://sanaregistry.org/r/ndmxml_unqualified/ndmxml-2.0.0-master-2.0.xsd\">\n",
     );
     for sgp4 in sgp4s {
-        xml.push_str(&gp_to_omm_xml(&sgp4.gp));
+        xml.push_str(&gp_to_omm_xml(&sgp4.gp)?);
     }
     xml.push_str("</ndm>\n");
 
-    xml
+    Ok(xml)
 }
 
 /// Writes a CCSDS XML OMM file from a slice of [`Sgp4`] structs.
@@ -2504,9 +2573,11 @@ pub fn to_omm_xml_string(sgp4s: &[Sgp4]) -> String {
 ///
 /// # Returns
 /// * `Ok(())` - If the file is written
-/// * `Err(GpError)` - If the file cannot be written
+/// * `Err(GpError)` - If a field cannot be written or the file cannot be written
 ///
 /// # Errors
+/// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
+/// * [`GpError::InvalidOmmEpoch`] - If an epoch calendar date or time of day is invalid
 /// * [`GpError::Io`] - If the file cannot be written
 ///
 /// # Examples
@@ -2562,7 +2633,7 @@ pub fn to_omm_xml_string(sgp4s: &[Sgp4]) -> String {
 #[cfg(all(feature = "xml", feature = "std"))]
 pub fn to_omm_xml_file(sgp4s: &[Sgp4], omm_xml_file_path: &str) -> Result<(), GpError> {
     // Serialize the element sets and write the XML file
-    let omm_xml_string = to_omm_xml_string(sgp4s);
+    let omm_xml_string = to_omm_xml_string(sgp4s)?;
     fs::write(omm_xml_file_path, omm_xml_string).map_err(|err| GpError::Io(err.to_string()))?;
     Ok(())
 }
@@ -2788,18 +2859,21 @@ pub fn from_omm_json_file(omm_json_file_path: &str) -> Result<Vec<Sgp4>, GpError
 /// * `value` - The number to format
 ///
 /// # Returns
-/// * A JSON number literal
+/// * `Ok(String)` - A JSON number literal
+/// * `Err(GpError)` - If the value is NaN or infinite
+///
+/// # Errors
+/// * [`GpError::NonFiniteValue`] - If the value is NaN or infinite
 #[cfg(feature = "json")]
-fn format_omm_json_number(value: f64) -> String {
+fn format_omm_json_number(value: f64) -> Result<String, GpError> {
     if value == 0.0 {
-        return "0".to_string();
+        return Ok("0".to_string());
     }
 
     let rounded = round(value * 1e12) / 1e12;
-    match serde_json::Number::from_f64(rounded) {
-        Some(n) => n.to_string(),
-        None => "0".to_string(),
-    }
+    serde_json::Number::from_f64(rounded)
+        .map(|n| n.to_string())
+        .ok_or(GpError::NonFiniteValue)
 }
 
 /// Build one OMM JSON object from a general perturbation element set
@@ -2817,9 +2891,13 @@ fn format_omm_json_number(value: f64) -> String {
 /// * `Err(GpError)` - If a string field cannot be serialized
 ///
 /// # Errors
+/// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
+/// * [`GpError::InvalidOmmEpoch`] - If the epoch is not a valid datetime
 /// * [`GpError::OmmJsonWrite`] - If a string field cannot be serialized
 #[cfg(feature = "json")]
 fn gp_to_omm_json(gp: &GenPerturbElementSet) -> Result<String, GpError> {
+    check_gp_finite(gp)?;
+
     // OMM MEAN_MOTION_DOT and MEAN_MOTION_DDOT are the TLE-printed values
     let mean_motion_dot = gp.first_derivative_of_mean_motion / 2.0;
     let mean_motion_ddot = gp.second_derivative_of_mean_motion / 6.0;
@@ -2836,32 +2914,32 @@ fn gp_to_omm_json(gp: &GenPerturbElementSet) -> Result<String, GpError> {
         ),
         format!(
             "        \"EPOCH\": {}",
-            serde_json::to_string(&format_omm_epoch(&gp.epoch_datetime))
+            serde_json::to_string(&format_omm_epoch(&gp.epoch_datetime)?)
                 .map_err(|_| GpError::OmmJsonWrite)?
         ),
         format!(
             "        \"MEAN_MOTION\": {}",
-            format_omm_json_number(gp.mean_motion)
+            format_omm_json_number(gp.mean_motion)?
         ),
         format!(
             "        \"ECCENTRICITY\": {}",
-            format_omm_json_number(gp.eccentricity)
+            format_omm_json_number(gp.eccentricity)?
         ),
         format!(
             "        \"INCLINATION\": {}",
-            format_omm_json_number(gp.inclination)
+            format_omm_json_number(gp.inclination)?
         ),
         format!(
             "        \"RA_OF_ASC_NODE\": {}",
-            format_omm_json_number(gp.right_ascension_of_ascending_node)
+            format_omm_json_number(gp.right_ascension_of_ascending_node)?
         ),
         format!(
             "        \"ARG_OF_PERICENTER\": {}",
-            format_omm_json_number(gp.argument_of_perigee)
+            format_omm_json_number(gp.argument_of_perigee)?
         ),
         format!(
             "        \"MEAN_ANOMALY\": {}",
-            format_omm_json_number(gp.mean_anomaly)
+            format_omm_json_number(gp.mean_anomaly)?
         ),
         format!("        \"EPHEMERIS_TYPE\": {}", gp.ephemeris_type),
         format!(
@@ -2875,14 +2953,14 @@ fn gp_to_omm_json(gp: &GenPerturbElementSet) -> Result<String, GpError> {
             "        \"REV_AT_EPOCH\": {}",
             gp.revolution_number_at_epoch
         ),
-        format!("        \"BSTAR\": {}", format_omm_json_number(gp.bstar)),
+        format!("        \"BSTAR\": {}", format_omm_json_number(gp.bstar)?),
         format!(
             "        \"MEAN_MOTION_DOT\": {}",
-            format_omm_json_number(mean_motion_dot)
+            format_omm_json_number(mean_motion_dot)?
         ),
         format!(
             "        \"MEAN_MOTION_DDOT\": {}",
-            format_omm_json_number(mean_motion_ddot)
+            format_omm_json_number(mean_motion_ddot)?
         ),
     ];
 
@@ -2904,9 +2982,11 @@ fn gp_to_omm_json(gp: &GenPerturbElementSet) -> Result<String, GpError> {
 ///
 /// # Returns
 /// * `Ok(String)` - A JSON array of OMM objects
-/// * `Err(GpError)` - If a string field cannot be serialized
+/// * `Err(GpError)` - If a field cannot be written
 ///
 /// # Errors
+/// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
+/// * [`GpError::InvalidOmmEpoch`] - If an epoch calendar date or time of day is invalid
 /// * [`GpError::OmmJsonWrite`] - If a string field cannot be serialized
 ///
 /// # Examples
@@ -2974,9 +3054,11 @@ pub fn to_omm_json_string(sgp4s: &[Sgp4]) -> Result<String, GpError> {
 ///
 /// # Returns
 /// * `Ok(())` - If the file is written
-/// * `Err(GpError)` - If serialization fails or the file cannot be written
+/// * `Err(GpError)` - If a field cannot be written or the file cannot be written
 ///
 /// # Errors
+/// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
+/// * [`GpError::InvalidOmmEpoch`] - If an epoch calendar date or time of day is invalid
 /// * [`GpError::OmmJsonWrite`] - If a string field cannot be serialized
 /// * [`GpError::Io`] - If the file cannot be written
 ///
@@ -3214,17 +3296,24 @@ pub fn from_omm_csv_file(omm_csv_file_path: &str) -> Result<Vec<Sgp4>, GpError> 
 /// * `gp` - The element set to serialize
 ///
 /// # Returns
-/// * One CSV data row, in [`OMM_CSV_HEADERS`] order
+/// * `Ok([String; 17])` - One CSV data row, in [`OMM_CSV_HEADERS`] order
+/// * `Err(GpError)` - If a field cannot be written
+///
+/// # Errors
+/// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
+/// * [`GpError::InvalidOmmEpoch`] - If the epoch is not a valid datetime
 #[cfg(feature = "csv")]
-fn gp_to_omm_csv_row(gp: &GenPerturbElementSet) -> [String; 17] {
+fn gp_to_omm_csv_row(gp: &GenPerturbElementSet) -> Result<[String; 17], GpError> {
+    check_gp_finite(gp)?;
+
     // OMM MEAN_MOTION_DOT and MEAN_MOTION_DDOT are the TLE-printed values
     let mean_motion_dot = gp.first_derivative_of_mean_motion / 2.0;
     let mean_motion_ddot = gp.second_derivative_of_mean_motion / 6.0;
 
-    [
+    Ok([
         gp.common_name.clone(),
         gp.international_designator.clone(),
-        format_omm_epoch(&gp.epoch_datetime),
+        format_omm_epoch(&gp.epoch_datetime)?,
         format_omm_decimal(gp.mean_motion),
         format_omm_decimal(gp.eccentricity),
         format_omm_decimal(gp.inclination),
@@ -3239,7 +3328,7 @@ fn gp_to_omm_csv_row(gp: &GenPerturbElementSet) -> [String; 17] {
         format_omm_sci(gp.bstar),
         format_omm_sci(mean_motion_dot),
         format_omm_sci(mean_motion_ddot),
-    ]
+    ])
 }
 
 /// Builds a Celestrak-style CSV OMM string from a slice of [`Sgp4`] structs.
@@ -3255,9 +3344,11 @@ fn gp_to_omm_csv_row(gp: &GenPerturbElementSet) -> [String; 17] {
 ///
 /// # Returns
 /// * `Ok(String)` - A CSV document with a header row and one row per record
-/// * `Err(GpError)` - If the in-memory CSV writer fails
+/// * `Err(GpError)` - If a field cannot be written
 ///
 /// # Errors
+/// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
+/// * [`GpError::InvalidOmmEpoch`] - If an epoch calendar date or time of day is invalid
 /// * [`GpError::OmmCsvWrite`] - If the in-memory CSV writer fails
 ///
 /// # Examples
@@ -3294,7 +3385,7 @@ pub fn to_omm_csv_string(sgp4s: &[Sgp4]) -> Result<String, GpError> {
         .map_err(|_| GpError::OmmCsvWrite)?;
     for sgp4 in sgp4s {
         writer
-            .write_record(gp_to_omm_csv_row(&sgp4.gp))
+            .write_record(gp_to_omm_csv_row(&sgp4.gp)?)
             .map_err(|_| GpError::OmmCsvWrite)?;
     }
 
@@ -3313,9 +3404,11 @@ pub fn to_omm_csv_string(sgp4s: &[Sgp4]) -> Result<String, GpError> {
 ///
 /// # Returns
 /// * `Ok(())` - If the file is written
-/// * `Err(GpError)` - If serialization fails or the file cannot be written
+/// * `Err(GpError)` - If a field cannot be written or the file cannot be written
 ///
 /// # Errors
+/// * [`GpError::NonFiniteValue`] - If a floating-point field is NaN or infinite
+/// * [`GpError::InvalidOmmEpoch`] - If an epoch calendar date or time of day is invalid
 /// * [`GpError::OmmCsvWrite`] - If the in-memory CSV writer fails
 /// * [`GpError::Io`] - If the file cannot be written
 ///
@@ -3528,6 +3621,90 @@ mod tests {
                 Ok(_) => panic!("expected InvalidTLEDateTime for month {month}"),
             };
             assert_eq!(err, GpError::InvalidTLEDateTime);
+        }
+    }
+
+    /// Write OMM epochs that round up to a whole minute as the next minute
+    ///
+    /// # Panics
+    /// * If an epoch is written with a seconds field of 60, or an invalid epoch is accepted
+    #[test]
+    fn test_format_omm_epoch_rounding() {
+        let mut epoch = DateTime {
+            year: 2008,
+            month: 12,
+            day: 31,
+            hour: 23,
+            minute: 59,
+            second: 59.9999999,
+            timezone: Timezone::UTC,
+        };
+        assert_eq!(
+            format_omm_epoch(&epoch),
+            Ok("2009-01-01T00:00:00.000000".to_string())
+        );
+
+        epoch.second = 60.5;
+        assert_eq!(
+            format_omm_epoch(&epoch),
+            Ok("2008-12-31T23:59:60.500000".to_string())
+        );
+
+        epoch.second = 7.25;
+        assert_eq!(
+            format_omm_epoch(&epoch),
+            Ok("2008-12-31T23:59:07.250000".to_string())
+        );
+
+        epoch.month = 13;
+        assert_eq!(format_omm_epoch(&epoch), Err(GpError::InvalidOmmEpoch));
+
+        // Whole-second epochs across a day never write a seconds field of 60
+        for second in 0..86400 {
+            let datetime = dayofyr2utc(2008, 1.0 + second as f64 / 86400.0)
+                .expect("day of year should convert");
+            let text = format_omm_epoch(&datetime).expect("epoch should format");
+            assert_ne!(&text[17..19], "60", "{text}");
+        }
+    }
+
+    /// Reject NaN and infinite fields in every writer
+    ///
+    /// # Panics
+    /// * If a writer accepts a non-finite field or panics
+    #[test]
+    fn test_export_rejects_non_finite() {
+        let tle = "\
+1 25544U 98067A   08264.51782528 -.00002182 -00100-2 -11606-4 0  2921
+2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537
+";
+        let setters: [fn(&mut GenPerturbElementSet, f64); 9] = [
+            |gp, v| gp.first_derivative_of_mean_motion = v,
+            |gp, v| gp.second_derivative_of_mean_motion = v,
+            |gp, v| gp.bstar = v,
+            |gp, v| gp.inclination = v,
+            |gp, v| gp.right_ascension_of_ascending_node = v,
+            |gp, v| gp.eccentricity = v,
+            |gp, v| gp.argument_of_perigee = v,
+            |gp, v| gp.mean_anomaly = v,
+            |gp, v| gp.mean_motion = v,
+        ];
+
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for (field, set) in setters.iter().enumerate() {
+                let mut sgp4s = from_tle_string(tle).expect("ISS TLE should parse");
+                set(&mut sgp4s[0].gp, value);
+                let expected = Err(GpError::NonFiniteValue);
+
+                assert_eq!(to_tle_string(&sgp4s), expected, "TLE field {field}");
+                assert_eq!(to_omm_kvn_string(&sgp4s), expected, "KVN field {field}");
+                #[cfg(feature = "xml")]
+                assert_eq!(to_omm_xml_string(&sgp4s), expected, "XML field {field}");
+                #[cfg(feature = "json")]
+                assert_eq!(to_omm_json_string(&sgp4s), expected, "JSON field {field}");
+                #[cfg(feature = "csv")]
+                assert_eq!(to_omm_csv_string(&sgp4s), expected, "CSV field {field}");
+            }
         }
     }
 
@@ -4532,7 +4709,7 @@ mod tests {
     #[test]
     fn test_omm_kvn_export_empty() {
         // An empty slice should produce an empty KVN string
-        let exported = to_omm_kvn_string(&[]);
+        let exported = to_omm_kvn_string(&[]).unwrap();
         assert_eq!(exported, "");
     }
 
@@ -4545,7 +4722,7 @@ mod tests {
         // Parse the KVN test file, export, and parse the export
         let original = from_omm_kvn_string(&read_fixture("test/omm_parsing_cases.txt"))
             .expect("could not parse test/omm_parsing_cases.txt");
-        let exported = to_omm_kvn_string(&original);
+        let exported = to_omm_kvn_string(&original).unwrap();
         let reparsed = from_omm_kvn_string(&exported).unwrap();
 
         assert_eq!(original.len(), reparsed.len());
@@ -4584,7 +4761,7 @@ mod tests {
     #[test]
     fn test_omm_xml_export_empty() {
         // An empty slice should produce an NDM document with no OMM records
-        let exported = to_omm_xml_string(&[]);
+        let exported = to_omm_xml_string(&[]).unwrap();
         let reparsed = from_omm_xml_string(&exported).unwrap();
         assert!(reparsed.is_empty());
     }
@@ -4599,7 +4776,7 @@ mod tests {
         // Parse the XML test file, export, and parse the export
         let original = from_omm_xml_string(&read_fixture("test/omm_parsing_cases.xml"))
             .expect("could not parse test/omm_parsing_cases.xml");
-        let exported = to_omm_xml_string(&original);
+        let exported = to_omm_xml_string(&original).unwrap();
         let reparsed = from_omm_xml_string(&exported).unwrap();
 
         assert_eq!(original.len(), reparsed.len());
