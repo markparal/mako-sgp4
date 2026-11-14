@@ -164,6 +164,12 @@ pub enum GpError {
     /// OMM CSV cannot be parsed
     InvalidOmmCsv,
 
+    /// OMM JSON cannot be written
+    OmmJsonWrite,
+
+    /// OMM CSV cannot be written
+    OmmCsvWrite,
+
     /// SGP4 initialization failed
     Sgp4(Sgp4Error),
 }
@@ -924,12 +930,15 @@ fn format_tle_intl_des(intl: &str) -> Result<String, GpError> {
 /// * `Err(GpError)` - If the datetime cannot be written as a TLE epoch
 ///
 /// # Errors
-/// * [`GpError::InvalidTLEDateTime`] - If the year is before 1957 or after 2056
+/// * [`GpError::InvalidTLEDateTime`] - If the year is before 1957 or after 2056, or the calendar date or time of day is invalid
 fn format_tle_epoch(epoch: &DateTime) -> Result<String, GpError> {
     // TLE two-digit years cover 1957-2056
     if !(1957..=2056).contains(&epoch.year) {
         return Err(GpError::InvalidTLEDateTime);
     }
+
+    // Month indexes the days-per-month table, so the calendar date must be valid
+    validate_datetime(epoch).map_err(|_| GpError::InvalidTLEDateTime)?;
 
     // TLE years are stored modulo 100
     let two_digit_year = ((epoch.year % 100) + 100) % 100;
@@ -1228,7 +1237,7 @@ fn gp_to_tle(gp: &GenPerturbElementSet) -> Result<String, GpError> {
 ///
 /// # Errors
 /// * [`GpError::InvalidTLECatalogNumber`] - If a catalog number is negative or greater than 339999
-/// * [`GpError::InvalidTLEDateTime`] - If an epoch year is before 1957 or after 2056
+/// * [`GpError::InvalidTLEDateTime`] - If an epoch year is before 1957 or after 2056, or an epoch calendar date or time of day is invalid
 /// * [`GpError::InvalidTLEInternationalDesignator`] - If a launch number or piece exceeds 3 characters
 /// * [`GpError::InvalidTLELine`] - If a formatted TLE data line is not 68 characters before the checksum
 ///
@@ -1282,7 +1291,7 @@ pub fn to_tle_string(sgp4s: &[Sgp4]) -> Result<String, GpError> {
 ///
 /// # Errors
 /// * [`GpError::InvalidTLECatalogNumber`] - If a catalog number is negative or greater than 339999
-/// * [`GpError::InvalidTLEDateTime`] - If an epoch year is before 1957 or after 2056
+/// * [`GpError::InvalidTLEDateTime`] - If an epoch year is before 1957 or after 2056, or an epoch calendar date or time of day is invalid
 /// * [`GpError::InvalidTLEInternationalDesignator`] - If a launch number or piece exceeds 3 characters
 /// * [`GpError::InvalidTLELine`] - If a formatted TLE data line is not 68 characters before the checksum
 /// * [`GpError::Io`] - If the file cannot be written
@@ -2793,9 +2802,13 @@ fn format_omm_json_number(value: f64) -> String {
 /// * `gp` - The element set to serialize
 ///
 /// # Returns
-/// * One pretty-printed JSON object
+/// * `Ok(String)` - One pretty-printed JSON object
+/// * `Err(GpError)` - If a string field cannot be serialized
+///
+/// # Errors
+/// * [`GpError::OmmJsonWrite`] - If a string field cannot be serialized
 #[cfg(feature = "json")]
-fn gp_to_omm_json(gp: &GenPerturbElementSet) -> String {
+fn gp_to_omm_json(gp: &GenPerturbElementSet) -> Result<String, GpError> {
     // OMM MEAN_MOTION_DOT and MEAN_MOTION_DDOT are the TLE-printed values
     let mean_motion_dot = gp.first_derivative_of_mean_motion / 2.0;
     let mean_motion_ddot = gp.second_derivative_of_mean_motion / 6.0;
@@ -2803,15 +2816,17 @@ fn gp_to_omm_json(gp: &GenPerturbElementSet) -> String {
     let fields = [
         format!(
             "        \"OBJECT_NAME\": {}",
-            serde_json::to_string(&gp.common_name).unwrap()
+            serde_json::to_string(&gp.common_name).map_err(|_| GpError::OmmJsonWrite)?
         ),
         format!(
             "        \"OBJECT_ID\": {}",
-            serde_json::to_string(&gp.international_designator).unwrap()
+            serde_json::to_string(&gp.international_designator)
+                .map_err(|_| GpError::OmmJsonWrite)?
         ),
         format!(
             "        \"EPOCH\": {}",
-            serde_json::to_string(&format_omm_epoch(&gp.epoch_datetime)).unwrap()
+            serde_json::to_string(&format_omm_epoch(&gp.epoch_datetime))
+                .map_err(|_| GpError::OmmJsonWrite)?
         ),
         format!(
             "        \"MEAN_MOTION\": {}",
@@ -2840,7 +2855,8 @@ fn gp_to_omm_json(gp: &GenPerturbElementSet) -> String {
         format!("        \"EPHEMERIS_TYPE\": {}", gp.ephemeris_type),
         format!(
             "        \"CLASSIFICATION_TYPE\": {}",
-            serde_json::to_string(&format_omm_classification(gp.classification)).unwrap()
+            serde_json::to_string(&format_omm_classification(gp.classification))
+                .map_err(|_| GpError::OmmJsonWrite)?
         ),
         format!("        \"NORAD_CAT_ID\": {}", gp.satellite_catalog_number),
         format!("        \"ELEMENT_SET_NO\": {}", gp.element_set_number),
@@ -2859,7 +2875,7 @@ fn gp_to_omm_json(gp: &GenPerturbElementSet) -> String {
         ),
     ];
 
-    format!("    {{\n{}\n    }}", fields.join(",\n"))
+    Ok(format!("    {{\n{}\n    }}", fields.join(",\n")))
 }
 
 /// Builds a Celestrak-style JSON OMM string from a slice of [`Sgp4`] structs.
@@ -2876,7 +2892,11 @@ fn gp_to_omm_json(gp: &GenPerturbElementSet) -> String {
 /// * `sgp4s` - The SGP4 structs to export
 ///
 /// # Returns
-/// * `String` - A JSON array of OMM objects
+/// * `Ok(String)` - A JSON array of OMM objects
+/// * `Err(GpError)` - If a string field cannot be serialized
+///
+/// # Errors
+/// * [`GpError::OmmJsonWrite`] - If a string field cannot be serialized
 ///
 /// # Examples
 /// ```rust
@@ -2903,7 +2923,7 @@ fn gp_to_omm_json(gp: &GenPerturbElementSet) -> String {
 ///
 /// // Parse, export, and parse again
 /// let sgp4s = from_omm_json_string(omm).unwrap();
-/// let exported = to_omm_json_string(&sgp4s);
+/// let exported = to_omm_json_string(&sgp4s).unwrap();
 /// let reparsed = from_omm_json_string(&exported).unwrap();
 ///
 /// // Assert the round-trip catalog number and name
@@ -2917,19 +2937,19 @@ fn gp_to_omm_json(gp: &GenPerturbElementSet) -> String {
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
 #[cfg(feature = "json")]
-pub fn to_omm_json_string(sgp4s: &[Sgp4]) -> String {
+pub fn to_omm_json_string(sgp4s: &[Sgp4]) -> Result<String, GpError> {
     // An empty slice is an empty JSON array
     if sgp4s.is_empty() {
-        return "[]\n".to_string();
+        return Ok("[]\n".to_string());
     }
 
     // Serialize each element set as one JSON object
     let mut objects = Vec::new();
     for sgp4 in sgp4s {
-        objects.push(gp_to_omm_json(&sgp4.gp));
+        objects.push(gp_to_omm_json(&sgp4.gp)?);
     }
 
-    format!("[\n{}\n]\n", objects.join(",\n"))
+    Ok(format!("[\n{}\n]\n", objects.join(",\n")))
 }
 
 /// Writes a Celestrak-style JSON OMM file from a slice of [`Sgp4`] structs.
@@ -2943,9 +2963,10 @@ pub fn to_omm_json_string(sgp4s: &[Sgp4]) -> String {
 ///
 /// # Returns
 /// * `Ok(())` - If the file is written
-/// * `Err(GpError)` - If the file cannot be written
+/// * `Err(GpError)` - If serialization fails or the file cannot be written
 ///
 /// # Errors
+/// * [`GpError::OmmJsonWrite`] - If a string field cannot be serialized
 /// * [`GpError::Io`] - If the file cannot be written
 ///
 /// # Examples
@@ -2996,7 +3017,7 @@ pub fn to_omm_json_string(sgp4s: &[Sgp4]) -> String {
 #[cfg(feature = "json")]
 pub fn to_omm_json_file(sgp4s: &[Sgp4], omm_json_file_path: &str) -> Result<(), GpError> {
     // Serialize the element sets and write the JSON file
-    let omm_json_string = to_omm_json_string(sgp4s);
+    let omm_json_string = to_omm_json_string(sgp4s)?;
     fs::write(omm_json_file_path, omm_json_string).map_err(|err| GpError::Io(err.to_string()))?;
     Ok(())
 }
@@ -3222,10 +3243,11 @@ fn gp_to_omm_csv_row(gp: &GenPerturbElementSet) -> [String; 17] {
 /// * `sgp4s` - The SGP4 structs to export
 ///
 /// # Returns
-/// * `String` - A CSV document with a header row and one row per record
+/// * `Ok(String)` - A CSV document with a header row and one row per record
+/// * `Err(GpError)` - If the in-memory CSV writer fails
 ///
-/// # Panics
-/// * If the in-memory CSV writer fails
+/// # Errors
+/// * [`GpError::OmmCsvWrite`] - If the in-memory CSV writer fails
 ///
 /// # Examples
 /// ```rust
@@ -3239,7 +3261,7 @@ fn gp_to_omm_csv_row(gp: &GenPerturbElementSet) -> [String; 17] {
 ///
 /// // Parse, export, and parse again
 /// let sgp4s = from_omm_csv_string(omm).unwrap();
-/// let exported = to_omm_csv_string(&sgp4s);
+/// let exported = to_omm_csv_string(&sgp4s).unwrap();
 /// let reparsed = from_omm_csv_string(&exported).unwrap();
 ///
 /// // Assert the round-trip catalog number and name
@@ -3253,20 +3275,20 @@ fn gp_to_omm_csv_row(gp: &GenPerturbElementSet) -> [String; 17] {
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
 #[cfg(feature = "csv")]
-pub fn to_omm_csv_string(sgp4s: &[Sgp4]) -> String {
+pub fn to_omm_csv_string(sgp4s: &[Sgp4]) -> Result<String, GpError> {
     // Write the header row, then one data row per element set
     let mut writer = WriterBuilder::new().from_writer(Vec::new());
     writer
         .write_record(OMM_CSV_HEADERS)
-        .expect("Cannot write OMM CSV");
+        .map_err(|_| GpError::OmmCsvWrite)?;
     for sgp4 in sgp4s {
         writer
             .write_record(gp_to_omm_csv_row(&sgp4.gp))
-            .expect("Cannot write OMM CSV");
+            .map_err(|_| GpError::OmmCsvWrite)?;
     }
 
-    let bytes = writer.into_inner().expect("Cannot write OMM CSV");
-    String::from_utf8(bytes).expect("Cannot write OMM CSV")
+    let bytes = writer.into_inner().map_err(|_| GpError::OmmCsvWrite)?;
+    String::from_utf8(bytes).map_err(|_| GpError::OmmCsvWrite)
 }
 
 /// Writes a Celestrak-style CSV OMM file from a slice of [`Sgp4`] structs.
@@ -3280,9 +3302,10 @@ pub fn to_omm_csv_string(sgp4s: &[Sgp4]) -> String {
 ///
 /// # Returns
 /// * `Ok(())` - If the file is written
-/// * `Err(GpError)` - If the file cannot be written
+/// * `Err(GpError)` - If serialization fails or the file cannot be written
 ///
 /// # Errors
+/// * [`GpError::OmmCsvWrite`] - If the in-memory CSV writer fails
 /// * [`GpError::Io`] - If the file cannot be written
 ///
 /// # Examples
@@ -3320,7 +3343,7 @@ pub fn to_omm_csv_string(sgp4s: &[Sgp4]) -> String {
 #[cfg(feature = "csv")]
 pub fn to_omm_csv_file(sgp4s: &[Sgp4], omm_csv_file_path: &str) -> Result<(), GpError> {
     // Serialize the element sets and write the CSV file
-    let omm_csv_string = to_omm_csv_string(sgp4s);
+    let omm_csv_string = to_omm_csv_string(sgp4s)?;
     fs::write(omm_csv_file_path, omm_csv_string).map_err(|err| GpError::Io(err.to_string()))?;
     Ok(())
 }
@@ -3456,7 +3479,7 @@ mod tests {
     /// Reject TLE epochs outside 1957 through 2056
     ///
     /// # Panics
-    /// * If 1956 or 2057 is accepted
+    /// * If 1956, 2057, or an out-of-range month is accepted
     #[test]
     fn test_invalid_tle_datetime() {
         let mut epoch = DateTime {
@@ -3480,6 +3503,17 @@ mod tests {
             Ok(_) => panic!("expected InvalidTLEDateTime"),
         };
         assert_eq!(err, GpError::InvalidTLEDateTime);
+
+        // An out-of-range month must be rejected, not index past the days-per-month table
+        for month in [0, 13, 14] {
+            epoch.year = 2008;
+            epoch.month = month;
+            let err = match format_tle_epoch(&epoch) {
+                Err(err) => err,
+                Ok(_) => panic!("expected InvalidTLEDateTime for month {month}"),
+            };
+            assert_eq!(err, GpError::InvalidTLEDateTime);
+        }
     }
 
     /// Reject a TLE data line that is too short for a checksum
@@ -4569,7 +4603,7 @@ mod tests {
     #[test]
     fn test_omm_json_export_empty() {
         // An empty slice should produce an empty JSON array
-        let exported = to_omm_json_string(&[]);
+        let exported = to_omm_json_string(&[]).unwrap();
         let reparsed = from_omm_json_string(&exported).unwrap();
         assert!(reparsed.is_empty());
     }
@@ -4584,7 +4618,7 @@ mod tests {
         // Parse the JSON test file, export, and parse the export
         let original = from_omm_json_file("test/omm_parsing_cases.json")
             .expect("could not parse test/omm_parsing_cases.json");
-        let exported = to_omm_json_string(&original);
+        let exported = to_omm_json_string(&original).unwrap();
         let reparsed = from_omm_json_string(&exported).unwrap();
 
         assert_eq!(original.len(), reparsed.len());
@@ -4623,7 +4657,7 @@ mod tests {
     #[test]
     fn test_omm_csv_export_empty() {
         // An empty slice should produce a header-only CSV
-        let exported = to_omm_csv_string(&[]);
+        let exported = to_omm_csv_string(&[]).unwrap();
         let reparsed = from_omm_csv_string(&exported).unwrap();
         assert!(reparsed.is_empty());
     }
@@ -4638,7 +4672,7 @@ mod tests {
         // Parse the CSV test file, export, and parse the export
         let original = from_omm_csv_file("test/omm_parsing_cases.csv")
             .expect("could not parse test/omm_parsing_cases.csv");
-        let exported = to_omm_csv_string(&original);
+        let exported = to_omm_csv_string(&original).unwrap();
         let reparsed = from_omm_csv_string(&exported).unwrap();
 
         assert_eq!(original.len(), reparsed.len());
