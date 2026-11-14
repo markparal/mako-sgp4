@@ -506,6 +506,7 @@ pub struct WholeDayResonanceParams {
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum Sgp4Error {
     /// Mean motion is less than or equal to zero
     InvalidMeanMotion,

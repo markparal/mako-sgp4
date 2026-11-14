@@ -116,6 +116,7 @@ pub struct StateVector {
 ///
 /// # References
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CoordinateFrame {
     /// J2000, an Earth-centered inertial (ECI) coordinate frame
     #[default]

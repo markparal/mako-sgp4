@@ -117,6 +117,7 @@ pub struct GenPerturbElementSet {
 
 /// GP errors
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum GpError {
     /// TLE line 0 is invalid
     InvalidTleLine0,

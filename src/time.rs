@@ -93,6 +93,7 @@ pub struct DateTime {
 ///
 /// # References
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum DateError {
     /// The provided date is before October 10th, 1582 (Gregorian calendar adoption)
     DateTooEarly,
@@ -128,6 +129,7 @@ pub enum DateError {
 ///
 /// # References
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Timezone {
     /// Coordinated Universal Time (UTC)
     ///

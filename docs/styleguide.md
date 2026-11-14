@@ -88,6 +88,8 @@ pub enum ExampleEnum {
 }
 ```
 
+Public enums are marked `#[non_exhaustive]` after the derive, so adding a variant is not a breaking change
+
 Constants should follow this structure
 
 ```rust
