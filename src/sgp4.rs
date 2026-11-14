@@ -1480,7 +1480,7 @@ pub fn calc_theta_g(jd0: f64, jdfrac0: f64) -> f64 {
 /// // Propagate to the TLE epoch
 /// let state_vector = sgp4_prop_datetime(&sgp4, &sgp4.gp.epoch_datetime).unwrap();
 /// assert_eq!(state_vector.coordinate_frame, CoordinateFrame::TEME);
-/// assert!(state_vector.r_x.is_finite());
+/// assert!(state_vector.position[0].is_finite());
 /// ```
 ///
 /// # References
@@ -1537,7 +1537,7 @@ pub fn sgp4_prop_datetime(sgp4: &Sgp4, datetime: &DateTime) -> Result<StateVecto
 /// // Propagate 6 hours past epoch
 /// let state_vector = sgp4_prop_delta(&sgp4, 360.0).unwrap();
 /// assert_eq!(state_vector.coordinate_frame, CoordinateFrame::TEME);
-/// assert!(state_vector.r_x.is_finite());
+/// assert!(state_vector.position[0].is_finite());
 /// ```
 ///
 /// # References
@@ -1944,12 +1944,8 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> Result<StateVector, Sgp4Err
     }
 
     Ok(StateVector {
-        r_x: rx,
-        r_y: ry,
-        r_z: rz,
-        v_x: r_dot_x,
-        v_y: r_dot_y,
-        v_z: r_dot_z,
+        position: [rx, ry, rz],
+        velocity: [r_dot_x, r_dot_y, r_dot_z],
         coordinate_frame: CoordinateFrame::TEME,
     })
 }
@@ -2284,12 +2280,12 @@ mod tests {
     /// * If any component differs by at least the Vallado tolerance
     fn assert_state_near(key: &str, name: &str, t_mins: f64, got: &StateVector, row: &EphemRow) {
         let checks = [
-            ("Position x", got.r_x, row.rx),
-            ("Position y", got.r_y, row.ry),
-            ("Position z", got.r_z, row.rz),
-            ("Velocity x", got.v_x, row.vx),
-            ("Velocity y", got.v_y, row.vy),
-            ("Velocity z", got.v_z, row.vz),
+            ("Position x", got.position[0], row.rx),
+            ("Position y", got.position[1], row.ry),
+            ("Position z", got.position[2], row.rz),
+            ("Velocity x", got.velocity[0], row.vx),
+            ("Velocity y", got.velocity[1], row.vy),
+            ("Velocity z", got.velocity[2], row.vz),
         ];
         for (label, value, expected) in checks {
             assert!(
@@ -2694,37 +2690,37 @@ mod tests {
         let checks = [
             (
                 "Position x",
-                got.r_x * 1000.0,
+                got.position[0] * 1000.0,
                 expected[0],
                 PYTHON_SGP4_POS_TOL_M,
             ),
             (
                 "Position y",
-                got.r_y * 1000.0,
+                got.position[1] * 1000.0,
                 expected[1],
                 PYTHON_SGP4_POS_TOL_M,
             ),
             (
                 "Position z",
-                got.r_z * 1000.0,
+                got.position[2] * 1000.0,
                 expected[2],
                 PYTHON_SGP4_POS_TOL_M,
             ),
             (
                 "Velocity x",
-                got.v_x * 1000.0,
+                got.velocity[0] * 1000.0,
                 expected[3],
                 PYTHON_SGP4_VEL_TOL_M_S,
             ),
             (
                 "Velocity y",
-                got.v_y * 1000.0,
+                got.velocity[1] * 1000.0,
                 expected[4],
                 PYTHON_SGP4_VEL_TOL_M_S,
             ),
             (
                 "Velocity z",
-                got.v_z * 1000.0,
+                got.velocity[2] * 1000.0,
                 expected[5],
                 PYTHON_SGP4_VEL_TOL_M_S,
             ),

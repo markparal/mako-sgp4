@@ -285,7 +285,7 @@ impl Satellite {
     pub fn propagate(&self, t: f64) -> Result<Vec<f64>, JsError> {
         let sv = sgp4_prop_delta(&self.sgp4, t)
             .map_err(|e| JsError::new(&format!("Propagation failed: {e:?}")))?;
-        Ok(vec![sv.r_x, sv.r_y, sv.r_z, sv.v_x, sv.v_y, sv.v_z])
+        Ok([sv.position, sv.velocity].concat())
     }
 
     /// Propagate a TEME position track
@@ -320,7 +320,7 @@ impl Satellite {
         let mut track = Vec::new();
         for t in sample_times(start, end, step) {
             match sgp4_prop_delta(&self.sgp4, t) {
-                Ok(sv) => track.extend_from_slice(&[sv.r_x, sv.r_y, sv.r_z]),
+                Ok(sv) => track.extend_from_slice(&sv.position),
                 Err(_) => break,
             }
         }
@@ -362,7 +362,7 @@ impl Satellite {
         for t in sample_times(start, end, step) {
             match sgp4_prop_delta(&self.sgp4, t) {
                 Ok(sv) => {
-                    let (lat, lon, alt) = teme2geodetic(sv.r_x, sv.r_y, sv.r_z, self.gmst(t));
+                    let (lat, lon, alt) = teme2geodetic(&sv.position, self.gmst(t));
                     track.extend_from_slice(&[lat, lon, alt]);
                 }
                 Err(_) => break,
@@ -404,9 +404,7 @@ fn sample_times(start: f64, end: f64, step: f64) -> impl Iterator<Item = f64> {
 /// then solves for geodetic latitude on the WGS-84 ellipsoid by fixed-point iteration.
 ///
 /// # Arguments
-/// * `x` - TEME position X component \[km\]
-/// * `y` - TEME position Y component \[km\]
-/// * `z` - TEME position Z component \[km\]
+/// * `position` - TEME position \[x, y, z\] \[km\]
 /// * `theta_g` - Greenwich mean sidereal time \[rad\]
 ///
 /// # Returns
@@ -414,7 +412,9 @@ fn sample_times(start: f64, end: f64, step: f64) -> impl Iterator<Item = f64> {
 ///
 /// # References
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
-fn teme2geodetic(x: f64, y: f64, z: f64, theta_g: f64) -> (f64, f64, f64) {
+fn teme2geodetic(position: &[f64; 3], theta_g: f64) -> (f64, f64, f64) {
+    let [x, y, z] = *position;
+
     // Rotate about Z by -GMST into the Earth-fixed frame
     let (s, c) = theta_g.sin_cos();
     let x_ef = c * x + s * y;
@@ -539,7 +539,7 @@ MEAN_MOTION_DDOT = 0
 
     #[test]
     fn geodetic_on_equator() {
-        let (lat, lon, alt) = teme2geodetic(WGS84.r_earth_eq + 400.0, 0.0, 0.0, 0.0);
+        let (lat, lon, alt) = teme2geodetic(&[WGS84.r_earth_eq + 400.0, 0.0, 0.0], 0.0);
         assert!(lat.abs() < 1e-9 && lon.abs() < 1e-9);
         assert!((alt - 400.0).abs() < 1e-9);
     }
@@ -547,7 +547,7 @@ MEAN_MOTION_DDOT = 0
     #[test]
     fn geodetic_on_pole() {
         let b = WGS84.r_earth_eq * (1.0 - WGS84.flattening);
-        let (lat, _, alt) = teme2geodetic(0.0, 0.0, b + 400.0, 0.0);
+        let (lat, _, alt) = teme2geodetic(&[0.0, 0.0, b + 400.0], 0.0);
         assert!((lat - 90.0).abs() < 1e-9);
         assert!((alt - 400.0).abs() < 1e-6);
     }

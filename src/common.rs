@@ -72,12 +72,8 @@ pub struct Wgs {
 ///
 /// // Define a TEME state (position in km, velocity in km/s)
 /// let state = StateVector {
-///     r_x: 1.0,
-///     r_y: 0.0,
-///     r_z: 0.0,
-///     v_x: 0.0,
-///     v_y: 7.5,
-///     v_z: 0.0,
+///     position: [1.0, 0.0, 0.0],
+///     velocity: [0.0, 7.5, 0.0],
 ///     coordinate_frame: CoordinateFrame::TEME,
 /// };
 ///
@@ -88,23 +84,11 @@ pub struct Wgs {
 /// # References
 #[derive(Default, Clone, Copy)]
 pub struct StateVector {
-    /// Position X component \[km\]
-    pub r_x: f64,
+    /// Position \[x, y, z\] \[km\]
+    pub position: [f64; 3],
 
-    /// Position Y component \[km\]
-    pub r_y: f64,
-
-    /// Position Z component \[km\]
-    pub r_z: f64,
-
-    /// Velocity X component \[km/s\]
-    pub v_x: f64,
-
-    /// Velocity Y component \[km/s\]
-    pub v_y: f64,
-
-    /// Velocity Z component \[km/s\]
-    pub v_z: f64,
+    /// Velocity \[x, y, z\] \[km/s\]
+    pub velocity: [f64; 3],
 
     /// Coordinate frame of the state vector
     pub coordinate_frame: CoordinateFrame,

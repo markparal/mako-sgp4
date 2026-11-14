@@ -12,7 +12,7 @@
 //! let state = sgp4_prop_delta(&sgp4, 0.0).unwrap();
 //!
 //! assert_eq!(sgp4.gp.satellite_catalog_number, 25544);
-//! assert!(state.r_x.is_finite());
+//! assert!(state.position[0].is_finite());
 //! ```
 
 pub mod common;

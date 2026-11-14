@@ -79,14 +79,8 @@ fn main() {
 
     // Print the result in TEME coordinates
     println!(
-        "{}\nr_TEME = [{:.3}, {:.3}, {:.3}] km\nv_TEME = [{:.3}, {:.3}, {:.3}] km/s",
-        omm_kvn_sgp4s[0].gp.common_name,
-        state.r_x,
-        state.r_y,
-        state.r_z,
-        state.v_x,
-        state.v_y,
-        state.v_z
+        "{}\nr_TEME = {:.3?} km\nv_TEME = {:.3?} km/s",
+        omm_kvn_sgp4s[0].gp.common_name, state.position, state.velocity
     );
 }
 
