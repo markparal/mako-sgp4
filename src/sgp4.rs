@@ -527,6 +527,9 @@ pub enum Sgp4Error {
 
     /// Propagated position or velocity is not finite (NaN or infinite)
     NonFiniteState,
+
+    /// Time since epoch is not finite or exceeds 100 years in magnitude
+    InvalidDeltaT,
 }
 
 // ------
@@ -554,6 +557,13 @@ const XPDOTP: f64 = 1440.0 / (2.0 * PI);
 /// # References
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 const RPTIM: f64 = 4.375_269_088_011_3e-3;
+
+/// Maximum magnitude of time since epoch \[min\]
+///
+/// 100 Julian years. Bounds the step count of the deep-space resonance
+/// integrator, which re-integrates from epoch in 720-minute steps on every
+/// call. Element sets carry no useful accuracy anywhere near this span.
+const MAX_DELTA_T: f64 = 100.0 * 365.25 * 1440.0;
 
 // ---------
 // Functions
@@ -1464,6 +1474,7 @@ pub fn calc_theta_g(jd0: f64, jdfrac0: f64) -> f64 {
 /// * [`Sgp4Error::InvalidSemilatusRectum`] - If the semilatus rectum is less than zero
 /// * [`Sgp4Error::SatelliteDecayed`] - If the satellite has decayed
 /// * [`Sgp4Error::NonFiniteState`] - If the propagated state is NaN or infinite
+/// * [`Sgp4Error::InvalidDeltaT`] - If `datetime` is more than 100 years from the epoch
 ///
 /// # Examples
 /// ```rust
@@ -1521,6 +1532,7 @@ pub fn sgp4_prop_datetime(sgp4: &Sgp4, datetime: &DateTime) -> Result<StateVecto
 /// * [`Sgp4Error::InvalidSemilatusRectum`] - If the semilatus rectum is less than zero
 /// * [`Sgp4Error::SatelliteDecayed`] - If the satellite has decayed
 /// * [`Sgp4Error::NonFiniteState`] - If the propagated state is NaN or infinite
+/// * [`Sgp4Error::InvalidDeltaT`] - If `delta_t` is not finite or exceeds 100 years in magnitude
 ///
 /// # Examples
 /// ```rust
@@ -1545,6 +1557,11 @@ pub fn sgp4_prop_datetime(sgp4: &Sgp4, datetime: &DateTime) -> Result<StateVecto
 /// - [Fundamentals of Astrodynamics and Applications by Vallado et al](https://celestrak.org/software/vallado-sw.php)
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
 pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> Result<StateVector, Sgp4Error> {
+    // Reject non-finite or out-of-range times before they reach the resonance integrator loop
+    if !delta_t.is_finite() || delta_t.abs() > MAX_DELTA_T {
+        return Err(Sgp4Error::InvalidDeltaT);
+    }
+
     // Create mutable variables for the orbital elements
     let mut m: f64;
     let mut omega: f64;
@@ -2487,6 +2504,37 @@ mod tests {
         assert!(matches!(
             sgp4_prop_delta(&sgp4, 0.0),
             Err(Sgp4Error::NonFiniteState)
+        ));
+    }
+
+    /// Reject non-finite and out-of-range times since epoch
+    ///
+    /// # Panics
+    /// * If an infinite, NaN, or beyond-limit `delta_t` is accepted, or the limit itself is rejected
+    #[test]
+    fn test_invalid_delta_t() {
+        let sgp4 = iss_sgp4();
+
+        for delta_t in [
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NAN,
+            MAX_DELTA_T * 1.000_001,
+            -MAX_DELTA_T * 1.000_001,
+            1.0e15,
+        ] {
+            assert!(
+                matches!(
+                    sgp4_prop_delta(&sgp4, delta_t),
+                    Err(Sgp4Error::InvalidDeltaT)
+                ),
+                "delta_t = {delta_t} should be rejected"
+            );
+        }
+
+        assert!(!matches!(
+            sgp4_prop_delta(&sgp4, MAX_DELTA_T),
+            Err(Sgp4Error::InvalidDeltaT)
         ));
     }
 
