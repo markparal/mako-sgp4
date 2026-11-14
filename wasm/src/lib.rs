@@ -108,7 +108,7 @@ impl Satellite {
 
         // Keep the first element set
         let sgp4 = parsed
-            .map_err(|e| JsError::new(&format!("Could not parse element set: {e:?}")))?
+            .map_err(|e| JsError::new(&format!("Could not parse element set: {e}")))?
             .into_iter()
             .next()
             .ok_or_else(|| JsError::new("No element set found"))?;
@@ -124,7 +124,7 @@ impl Satellite {
             timezone: Timezone::UTC,
         };
         let (jd_unix, jdfrac_unix) = utc2jday(&unix_epoch)
-            .map_err(|e| JsError::new(&format!("Could not convert Unix epoch: {e:?}")))?;
+            .map_err(|e| JsError::new(&format!("Could not convert Unix epoch: {e}")))?;
 
         // Subtract whole days and day-fractions separately to limit rounding error
         let epoch_unix_ms = ((sgp4.jd0 - jd_unix) + (sgp4.jdfrac0 - jdfrac_unix)) * 86_400_000.;
@@ -284,7 +284,7 @@ impl Satellite {
     /// ```
     pub fn propagate(&self, t: f64) -> Result<Vec<f64>, JsError> {
         let sv = sgp4_prop_delta(&self.sgp4, t)
-            .map_err(|e| JsError::new(&format!("Propagation failed: {e:?}")))?;
+            .map_err(|e| JsError::new(&format!("Propagation failed: {e}")))?;
         Ok([sv.position, sv.velocity].concat())
     }
 

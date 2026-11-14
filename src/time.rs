@@ -4,6 +4,7 @@
 // ------------------
 // External Libraries
 // ------------------
+use core::fmt;
 
 // ------------------
 // Internal Libraries
@@ -150,6 +151,25 @@ pub enum Timezone {
 // ------
 // Traits
 // ------
+
+/// Human-readable [`DateError`] messages
+///
+/// Messages start lowercase and have no trailing period, so they compose
+/// into longer messages.
+impl fmt::Display for DateError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DateError::DateTooEarly => f.write_str("the provided date is before October 10th, 1582 (Gregorian calendar adoption)"),
+            DateError::InvalidDayOfYear => f.write_str("the day of year is invalid (less than 1 or greater than 365/366)"),
+            DateError::DateNotUTC => f.write_str("the datetime is not in UTC"),
+            DateError::InvalidCalendarDate => f.write_str("the month is outside 1-12 or the day is outside the days in that month"),
+            DateError::InvalidTimeOfDay => f.write_str("the hour, minute, or second is outside its range (0-23, 0-59, 0.0 to less than 61.0)"),
+        }
+    }
+}
+
+/// [`DateError`] is a standard error, usable with `?` into `Box<dyn Error>`
+impl core::error::Error for DateError {}
 
 // ---------
 // Constants

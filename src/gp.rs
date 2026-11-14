@@ -6,6 +6,7 @@
 // ------------------
 // External Libraries
 // ------------------
+use core::fmt;
 #[cfg(feature = "std")]
 use std::fs;
 
@@ -141,13 +142,13 @@ pub enum GpError {
     /// TLE line 1 and line 2 have different NORAD catalog numbers
     MismatchedTleCatalog,
 
-    /// A TLE file could not be read
+    /// A file could not be read or written
     Io(String),
 
     /// TLE catalog number is negative or outside the Alpha-5 range
     InvalidTLECatalogNumber,
 
-    /// TLE epoch datetime is before 1957 or after 2056
+    /// TLE epoch datetime is before 1957, after 2056, or not a valid date and time
     InvalidTLEDateTime,
 
     /// A TLE data line is not 68 characters before the checksum
@@ -187,6 +188,80 @@ pub enum GpError {
 // ------
 // Traits
 // ------
+
+/// Human-readable [`GpError`] messages
+///
+/// Messages start lowercase and have no trailing period, so they compose
+/// into longer messages. A wrapped [`Sgp4Error`] is available through
+/// [`core::error::Error::source`].
+///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::gp::{GpError, from_tle_lines};
+///
+/// // GpError converts into Box<dyn Error> with `?`
+/// fn parse(line1: &str, line2: &str) -> Result<i32, Box<dyn std::error::Error>> {
+///     Ok(from_tle_lines(line1, line2, None)?.gp.satellite_catalog_number)
+/// }
+///
+/// // A short line 1 is rejected with a readable message
+/// let err = parse("1 25544U", "2 25544").unwrap_err();
+/// assert_eq!(err.to_string(), "TLE line 1 is invalid");
+/// assert_eq!(GpError::InvalidTleLine1.to_string(), "TLE line 1 is invalid");
+/// ```
+impl fmt::Display for GpError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            GpError::InvalidTleLine0 => f.write_str("TLE line 0 is invalid"),
+            GpError::InvalidTleLine1 => f.write_str("TLE line 1 is invalid"),
+            GpError::InvalidTleLine2 => f.write_str("TLE line 2 is invalid"),
+            GpError::InvalidTleEpoch => f.write_str("TLE epoch is invalid"),
+            GpError::MismatchedTleCatalog => {
+                f.write_str("TLE line 1 and line 2 have different NORAD catalog numbers")
+            }
+            GpError::Io(message) => write!(f, "a file could not be read or written: {message}"),
+            GpError::InvalidTLECatalogNumber => {
+                f.write_str("TLE catalog number is negative or outside the Alpha-5 range")
+            }
+            GpError::InvalidTLEDateTime => f.write_str(
+                "TLE epoch datetime is before 1957, after 2056, or not a valid date and time",
+            ),
+            GpError::InvalidTLELine => {
+                f.write_str("a TLE data line is not 68 characters before the checksum")
+            }
+            GpError::InvalidTLEInternationalDesignator => f.write_str(
+                "TLE international designator launch number or piece exceeds 3 characters",
+            ),
+            GpError::InvalidOmmField => {
+                f.write_str("an OMM field cannot be parsed as the requested type")
+            }
+            GpError::InvalidOmmEpoch => {
+                f.write_str("OMM EPOCH cannot be parsed or written as a valid UTC datetime")
+            }
+            GpError::InvalidOmmXml => f.write_str("OMM XML document cannot be parsed"),
+            GpError::InvalidOmmJson => {
+                f.write_str("OMM JSON cannot be parsed or is not an object or array of objects")
+            }
+            GpError::InvalidOmmCsv => f.write_str("OMM CSV cannot be parsed"),
+            GpError::OmmJsonWrite => f.write_str("OMM JSON cannot be written"),
+            GpError::OmmCsvWrite => f.write_str("OMM CSV cannot be written"),
+            GpError::NonFiniteValue => {
+                f.write_str("a floating-point GP field to be written is NaN or infinite")
+            }
+            GpError::Sgp4(_) => f.write_str("SGP4 initialization failed"),
+        }
+    }
+}
+
+/// [`GpError`] is a standard error, usable with `?` into `Box<dyn Error>`
+impl core::error::Error for GpError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        match self {
+            GpError::Sgp4(err) => Some(err),
+            _ => None,
+        }
+    }
+}
 
 /// Convert an OMM field value into a typed GP field
 ///
@@ -3622,6 +3697,62 @@ mod tests {
             };
             assert_eq!(err, GpError::InvalidTLEDateTime);
         }
+    }
+
+    /// Errors display readable messages and expose wrapped causes
+    ///
+    /// # Panics
+    /// * If a message or the source chain differs from the expected text
+    #[test]
+    fn test_error_display_and_source() {
+        use crate::time::DateError;
+        use core::error::Error;
+        use std::boxed::Box;
+
+        // Messages follow the variant docs
+        assert_eq!(
+            GpError::InvalidTleLine0.to_string(),
+            "TLE line 0 is invalid"
+        );
+        assert_eq!(
+            GpError::Io("no such file".to_string()).to_string(),
+            "a file could not be read or written: no such file"
+        );
+        assert_eq!(
+            Sgp4Error::InvalidMeanMotion.to_string(),
+            "mean motion is less than or equal to zero"
+        );
+        assert_eq!(
+            DateError::DateNotUTC.to_string(),
+            "the datetime is not in UTC"
+        );
+
+        // A nested error exposes each cause through source()
+        let err = GpError::Sgp4(Sgp4Error::InvalidDateTime(DateError::DateNotUTC));
+        let mut chain = vec![err.to_string()];
+        let mut source = err.source();
+        while let Some(cause) = source {
+            chain.push(cause.to_string());
+            source = cause.source();
+        }
+        assert_eq!(
+            chain,
+            [
+                "SGP4 initialization failed",
+                "epoch or propagation datetime could not be converted to Julian date",
+                "the datetime is not in UTC",
+            ]
+        );
+        assert!(GpError::InvalidOmmCsv.source().is_none());
+
+        // `?` converts each error type into Box<dyn Error>
+        fn boxed(err: GpError) -> Result<(), Box<dyn Error>> {
+            Err(err)?
+        }
+        assert_eq!(
+            boxed(GpError::NonFiniteValue).unwrap_err().to_string(),
+            "a floating-point GP field to be written is NaN or infinite"
+        );
     }
 
     /// Write OMM epochs that round up to a whole minute as the next minute

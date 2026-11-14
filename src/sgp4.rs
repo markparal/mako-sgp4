@@ -4,6 +4,7 @@
 // External Libraries
 // ------------------
 use core::f64::consts::PI;
+use core::fmt;
 
 // ------------------
 // Internal Libraries
@@ -537,6 +538,49 @@ pub enum Sgp4Error {
 // ------
 // Traits
 // ------
+
+/// Human-readable [`Sgp4Error`] messages
+///
+/// Messages start lowercase and have no trailing period, so they compose
+/// into longer messages.
+impl fmt::Display for Sgp4Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Sgp4Error::InvalidMeanMotion => {
+                f.write_str("mean motion is less than or equal to zero")
+            }
+            Sgp4Error::InvalidMeanEccentricity => {
+                f.write_str("mean eccentricity is outside the range 0.0 to 1.0")
+            }
+            Sgp4Error::InvalidPerturbedEccentricity => {
+                f.write_str("perturbed eccentricity is outside the range 0.0 to 1.0")
+            }
+            Sgp4Error::InvalidSemilatusRectum => f.write_str("semilatus rectum is less than zero"),
+            Sgp4Error::SatelliteDecayed => {
+                f.write_str("satellite has decayed (position radius is less than 1 Earth radius)")
+            }
+            Sgp4Error::InvalidDateTime(_) => {
+                f.write_str("epoch or propagation datetime could not be converted to Julian date")
+            }
+            Sgp4Error::NonFiniteState => {
+                f.write_str("propagated position or velocity is not finite (NaN or infinite)")
+            }
+            Sgp4Error::InvalidDeltaT => {
+                f.write_str("time since epoch is not finite or exceeds 100 years in magnitude")
+            }
+        }
+    }
+}
+
+/// [`Sgp4Error`] is a standard error, usable with `?` into `Box<dyn Error>`
+impl core::error::Error for Sgp4Error {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        match self {
+            Sgp4Error::InvalidDateTime(err) => Some(err),
+            _ => None,
+        }
+    }
+}
 
 // ---------
 // Constants
