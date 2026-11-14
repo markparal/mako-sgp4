@@ -42,6 +42,17 @@ jobs:
           echo "::endgroup::"
         done
 
+  no-std:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: thumbv7em-none-eabihf
+    - run: cargo build -p mako-sgp4 --target thumbv7em-none-eabihf --no-default-features
+    - run: cargo build -p mako-sgp4 --target thumbv7em-none-eabihf --no-default-features --features xml,json
+    - run: cargo test -p mako-sgp4 --no-default-features --features xml,json
+
   wasm:
     runs-on: ubuntu-latest
     steps:

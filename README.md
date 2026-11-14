@@ -83,18 +83,23 @@ cargo run --example propagate_tle
 
 TLE and OMM KVN parsing are always available. XML, JSON, and CSV OMM support are optional Cargo features but **on by default**.
 
-| Feature | Formats |
+| Feature | Adds |
 | --- | --- |
 | *(none / core)* | TLE, OMM KVN |
+| `std` | `*_file` functions that read and write files |
 | `xml` | OMM XML |
 | `json` | OMM JSON |
-| `csv` | OMM CSV |
+| `csv` | OMM CSV (turns on `std`) |
 
 ```bash
-cargo add mako-sgp4                                           # TLE, KVN, XML, JSON, CSV
-cargo add mako-sgp4 --no-default-features                     # TLE and KVN only, no 3rd party dependencies
+cargo add mako-sgp4                                           # TLE, KVN, XML, JSON, CSV, file functions
+cargo add mako-sgp4 --no-default-features                     # TLE and KVN only, no_std, depends only on libm
 cargo add mako-sgp4 --no-default-features --features json,csv # Exclude XML
 ```
+
+#### no_std
+
+mako-sgp4 is `#![no_std]` and needs only `alloc`, so it builds for bare-metal targets such as `thumbv7em-none-eabihf`. Turn off default features to drop `std`. The `xml` and `json` features also work without `std`. Only `csv` needs it. Floating-point math comes from [libm](https://crates.io/crates/libm) on every target, so results are bit-identical across platforms.
 
 ## WebAssembly
 

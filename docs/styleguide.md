@@ -141,5 +141,11 @@ pub fn example_function(arg1: type) -> (return1) {
 
 Note that for all non-`pub`, the `# Examples` section is unnecessary.
 
+## no_std
+The crate is `#![no_std]`. Follow these rules to keep it that way.
+- Import `String`, `Vec`, `format!`, and collections from `alloc`, and constants such as `PI` from `core`
+- Call floating-point math through `crate::math` (`sin(x)`, not `x.sin()`). The `f64` methods come from `std` and would bypass `libm`
+- Gate anything that needs `std`, such as file I/O, behind the `std` feature
+
 ## Special Characters
 Avoid including special characters in code and docstrings.

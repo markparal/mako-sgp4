@@ -8,6 +8,7 @@
 // ------------------
 // Internal Libraries
 // ------------------
+use crate::math::floor;
 
 // -------
 // Structs
@@ -303,8 +304,8 @@ pub fn utc2jday(utc_datetime: &DateTime) -> Result<(f64, f64), DateError> {
 
     // Make JD whole
     if !(0.0..1.0).contains(&jdfrac) {
-        jd += jdfrac.floor();
-        jdfrac = jdfrac - jdfrac.floor();
+        jd += floor(jdfrac);
+        jdfrac = jdfrac - floor(jdfrac);
     }
 
     Ok((jd, jdfrac))
@@ -393,17 +394,16 @@ pub fn utc2mjday(utc_datetime: &DateTime) -> Result<(f64, f64), DateError> {
     }
 
     // Account for leap days with B auxilary quantity
-    let b_leap: f64 =
-        (year_leap / 400.).floor() - (year_leap / 100.).floor() + (year_leap / 4.).floor();
+    let b_leap: f64 = floor(year_leap / 400.) - floor(year_leap / 100.) + floor(year_leap / 4.);
 
     // Calculate the modified Julian date
-    let mut mjd = 365. * year_leap - 679004. + b_leap + (30.6001 * (month_leap + 1.)).floor() + day;
+    let mut mjd = 365. * year_leap - 679004. + b_leap + floor(30.6001 * (month_leap + 1.)) + day;
     let mut mjdfrac = (second + minute * 60. + hour * 3600.) / 86400.;
 
     // Validate mjdfrac
     if !(0.0..1.0).contains(&mjdfrac) {
-        mjd += mjdfrac.floor();
-        mjdfrac = mjdfrac - mjdfrac.floor();
+        mjd += floor(mjdfrac);
+        mjdfrac = mjdfrac - floor(mjdfrac);
     }
 
     Ok((mjd, mjdfrac))
@@ -459,7 +459,7 @@ pub fn dayofyr2utc(year: i32, dayofyr: f64) -> Result<DateTime, DateError> {
     let max_days = if is_leap { 366 } else { 365 };
 
     // Extract integer and fractional parts
-    let day_int = dayofyr.floor() as i32;
+    let day_int = floor(dayofyr) as i32;
 
     // Validate day of year doesn't exceed days in year (check integer part)
     if day_int > max_days {
@@ -489,9 +489,9 @@ pub fn dayofyr2utc(year: i32, dayofyr: f64) -> Result<DateTime, DateError> {
 
     // Convert fractional day to hours, minutes, seconds
     let total_seconds = day_frac * 86400.0;
-    let hour = (total_seconds / 3600.0).floor() as i32;
+    let hour = floor(total_seconds / 3600.0) as i32;
     let remaining_seconds = total_seconds - (hour as f64 * 3600.0);
-    let minute = (remaining_seconds / 60.0).floor() as i32;
+    let minute = floor(remaining_seconds / 60.0) as i32;
     let second = remaining_seconds - (minute as f64 * 60.0);
 
     // Protect against rounding errors and handle overflow

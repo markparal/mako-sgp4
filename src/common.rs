@@ -4,11 +4,12 @@
 // ------------------
 // External Libraries
 // ------------------
-use std::f64::consts::PI;
+use core::f64::consts::PI;
 
 // ------------------
 // Internal Libraries
 // ------------------
+use crate::math::{powi, sqrt};
 
 // -------
 // Structs
@@ -266,7 +267,7 @@ pub fn deg2rad(theta: f64) -> f64 {
 /// - [Revisiting Spacetrack Report #3: Rev 3 by Vallado et al](https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf)
 pub fn calc_period(a: f64, mu: f64) -> f64 {
     // Calculate time period in minutes
-    2. * PI * (a.powi(3) / mu).sqrt() / 60.
+    2. * PI * sqrt(powi(a, 3) / mu) / 60.
 }
 
 // ----------

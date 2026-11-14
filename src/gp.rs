@@ -6,10 +6,16 @@
 // ------------------
 // External Libraries
 // ------------------
+#[cfg(feature = "std")]
 use std::fs;
 
+use alloc::format;
+use alloc::string::{String, ToString};
+use alloc::vec;
+use alloc::vec::Vec;
+
 #[cfg(any(feature = "xml", feature = "json", feature = "csv"))]
-use std::collections::HashMap;
+use alloc::collections::BTreeMap;
 
 #[cfg(feature = "xml")]
 use roxmltree::{Document, Node};
@@ -23,6 +29,7 @@ use csv::{ReaderBuilder, WriterBuilder};
 // ------------------
 // Internal Libraries
 // ------------------
+use crate::math::{abs, floor, log10, powi, round};
 use crate::sgp4::{Sgp4, Sgp4Error, init_sgp4};
 use crate::time::{DateTime, Timezone, dayofyr2utc, validate_datetime};
 
@@ -448,7 +455,7 @@ pub fn from_tle_lines(line1: &str, line2: &str, line0: Option<&str>) -> Result<S
     let nddot_exp: i32 = line1[50..52]
         .parse()
         .map_err(|_| GpError::InvalidTleLine1)?;
-    gp.second_derivative_of_mean_motion = nddot_mantissa * 10.0_f64.powi(nddot_exp) * 6.0;
+    gp.second_derivative_of_mean_motion = nddot_mantissa * powi(10.0_f64, nddot_exp) * 6.0;
 
     // B* [1/Earth Radii]
     // Sign is a single column (space, +, or -) and must not be trimmed
@@ -464,7 +471,7 @@ pub fn from_tle_lines(line1: &str, line2: &str, line0: Option<&str>) -> Result<S
     let bstar_exp: i32 = line1[59..61]
         .parse()
         .map_err(|_| GpError::InvalidTleLine1)?;
-    gp.bstar = bstar_mantissa * 10.0_f64.powi(bstar_exp);
+    gp.bstar = bstar_mantissa * powi(10.0_f64, bstar_exp);
 
     // Ephemeris type
     if line1[62..63].trim().is_empty() {
@@ -668,6 +675,7 @@ pub fn from_tle_string(tle_string: &str) -> Result<Vec<Sgp4>, GpError> {
 ///
 /// # References
 /// - [Celestrak TLE Format](https://celestrak.org/columns/v04n03/#FAQ01)
+#[cfg(feature = "std")]
 pub fn from_tle_file(file_path: &str) -> Result<Vec<Sgp4>, GpError> {
     // Open the TLE file
     let tle_string = fs::read_to_string(file_path).map_err(|err| GpError::Io(err.to_string()))?;
@@ -983,7 +991,7 @@ fn format_tle_epoch(epoch: &DateTime) -> Result<String, GpError> {
 /// * A 10-character mean-motion-dot field
 fn format_tle_ndot(value: f64) -> String {
     // Eight digits after the implied 0. prefix
-    let mut digits = (value.abs() * 1e8).round() as i64;
+    let mut digits = round(abs(value) * 1e8) as i64;
     if digits > 99999999 {
         digits = 99999999;
     }
@@ -1011,12 +1019,12 @@ fn format_tle_exp(value: f64) -> String {
     }
 
     let sign = if value < 0.0 { '-' } else { ' ' };
-    let abs = value.abs();
+    let magnitude = abs(value);
 
     // Mantissa in [0.1, 1) so the five digits sit after an implied decimal
-    let mut exp = abs.log10().floor() as i32 + 1;
-    let mantissa = abs / 10f64.powi(exp);
-    let mut digits = (mantissa * 100000.0).round() as i32;
+    let mut exp = floor(log10(magnitude)) as i32 + 1;
+    let mantissa = magnitude / powi(10f64, exp);
+    let mut digits = round(mantissa * 100000.0) as i32;
 
     if digits >= 100000 {
         digits = 10000;
@@ -1050,7 +1058,7 @@ fn format_tle_exp(value: f64) -> String {
 /// * A 7-character eccentricity field
 fn format_tle_eccentricity(eccentricity: f64) -> String {
     // Seven digits after the implied 0. prefix
-    let mut digits = (eccentricity.abs() * 1e7).round() as i64;
+    let mut digits = round(abs(eccentricity) * 1e7) as i64;
     digits = digits.clamp(0, 9999999);
     format!("{:07}", digits)
 }
@@ -1328,6 +1336,7 @@ pub fn to_tle_string(sgp4s: &[Sgp4]) -> Result<String, GpError> {
 /// # References
 /// - [Celestrak TLE Format](https://celestrak.org/columns/v04n03/#FAQ01)
 /// - [Alpha-5 Standard](https://www.space-track.org/documentation#tle-alpha5)
+#[cfg(feature = "std")]
 pub fn to_tle_file(sgp4s: &[Sgp4], tle_file_path: &str) -> Result<(), GpError> {
     // Serialize the element sets and write the TLE file
     let tle_string = to_tle_string(sgp4s)?;
@@ -1545,6 +1554,7 @@ pub fn from_omm_kvn_string(omm_kvn_string: &str) -> Result<Vec<Sgp4>, GpError> {
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
+#[cfg(feature = "std")]
 pub fn from_omm_kvn_file(omm_kvn_file_path: &str) -> Result<Vec<Sgp4>, GpError> {
     // Open the OMM KVN file
     let omm_kvn_string =
@@ -1776,7 +1786,7 @@ fn format_omm_decimal(value: f64) -> String {
         return "0".to_string();
     }
 
-    let rounded = (value * 1e12).round() / 1e12;
+    let rounded = round(value * 1e12) / 1e12;
     strip_leading_decimal_zero(&trim_decimal_zeros(&format!("{:.12}", rounded)))
 }
 
@@ -1797,11 +1807,11 @@ fn format_omm_sci(value: f64) -> String {
     }
 
     let sign = if value < 0.0 { "-" } else { "" };
-    let abs = value.abs();
+    let magnitude = abs(value);
 
     // Mantissa in [0.1, 1) so the leading digit sits after the decimal point
-    let mut exp = abs.log10().floor() as i32 + 1;
-    let mut mantissa = abs / 10f64.powi(exp);
+    let mut exp = floor(log10(magnitude)) as i32 + 1;
+    let mut mantissa = magnitude / powi(10f64, exp);
 
     if mantissa >= 1.0 {
         mantissa /= 10.0;
@@ -1813,7 +1823,7 @@ fn format_omm_sci(value: f64) -> String {
 
     // 10 digits after the decimal, then drop trailing zeros
     const SCALE: f64 = 10_000_000_000.0;
-    let mut digits = (mantissa * SCALE).round() as i64;
+    let mut digits = round(mantissa * SCALE) as i64;
     if digits >= 10_000_000_000 {
         exp += 1;
         digits = 1_000_000_000;
@@ -2056,6 +2066,7 @@ pub fn to_omm_kvn_string(sgp4s: &[Sgp4]) -> String {
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
+#[cfg(feature = "std")]
 pub fn to_omm_kvn_file(sgp4s: &[Sgp4], omm_kvn_file_path: &str) -> Result<(), GpError> {
     // Serialize the element sets and write the KVN file
     let omm_kvn_string = to_omm_kvn_string(sgp4s);
@@ -2074,8 +2085,8 @@ pub fn to_omm_kvn_file(sgp4s: &[Sgp4], omm_kvn_file_path: &str) -> Result<(), Gp
 /// # Returns
 /// * A map of OMM keyword to text value
 #[cfg(feature = "xml")]
-fn xml_omm_fields(omm: Node) -> HashMap<String, String> {
-    let mut fields = HashMap::new();
+fn xml_omm_fields(omm: Node) -> BTreeMap<String, String> {
+    let mut fields = BTreeMap::new();
 
     for node in omm.descendants() {
         if !node.is_element() {
@@ -2258,7 +2269,7 @@ pub fn from_omm_xml_string(omm_xml_string: &str) -> Result<Vec<Sgp4>, GpError> {
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
-#[cfg(feature = "xml")]
+#[cfg(all(feature = "xml", feature = "std"))]
 pub fn from_omm_xml_file(omm_xml_file_path: &str) -> Result<Vec<Sgp4>, GpError> {
     // Open the OMM XML file
     let omm_xml_string =
@@ -2548,7 +2559,7 @@ pub fn to_omm_xml_string(sgp4s: &[Sgp4]) -> String {
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
-#[cfg(feature = "xml")]
+#[cfg(all(feature = "xml", feature = "std"))]
 pub fn to_omm_xml_file(sgp4s: &[Sgp4], omm_xml_file_path: &str) -> Result<(), GpError> {
     // Serialize the element sets and write the XML file
     let omm_xml_string = to_omm_xml_string(sgp4s);
@@ -2666,15 +2677,15 @@ pub fn from_omm_json_string(omm_json_string: &str) -> Result<Vec<Sgp4>, GpError>
 /// * `record` - The JSON object to flatten
 ///
 /// # Returns
-/// * `Ok(HashMap)` - A map of OMM keyword to text value
+/// * `Ok(BTreeMap)` - A map of OMM keyword to text value
 /// * `Err(GpError)` - If the JSON value is not an object
 #[cfg(feature = "json")]
-fn json_omm_fields(record: &Value) -> Result<HashMap<String, String>, GpError> {
+fn json_omm_fields(record: &Value) -> Result<BTreeMap<String, String>, GpError> {
     let Some(object) = record.as_object() else {
         return Err(GpError::InvalidOmmJson);
     };
 
-    let mut fields = HashMap::new();
+    let mut fields = BTreeMap::new();
     for (key, value) in object {
         if key.eq_ignore_ascii_case("COMMENT") {
             continue;
@@ -2757,7 +2768,7 @@ fn json_omm_fields(record: &Value) -> Result<HashMap<String, String>, GpError> {
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
-#[cfg(feature = "json")]
+#[cfg(all(feature = "json", feature = "std"))]
 pub fn from_omm_json_file(omm_json_file_path: &str) -> Result<Vec<Sgp4>, GpError> {
     // Open the OMM JSON file
     let omm_json_string =
@@ -2784,7 +2795,7 @@ fn format_omm_json_number(value: f64) -> String {
         return "0".to_string();
     }
 
-    let rounded = (value * 1e12).round() / 1e12;
+    let rounded = round(value * 1e12) / 1e12;
     match serde_json::Number::from_f64(rounded) {
         Some(n) => n.to_string(),
         None => "0".to_string(),
@@ -3014,7 +3025,7 @@ pub fn to_omm_json_string(sgp4s: &[Sgp4]) -> Result<String, GpError> {
 /// - [CCSDS Orbit Data Messages Specification](https://ccsds.org/Pubs/502x0b3e1.pdf)
 /// - [CCSDS XML Specification for Navigation Data Messages](https://ccsds.org/Pubs/505x0b3e2.pdf)
 /// - [Celestrak GP Data Formats](https://celestrak.org/NORAD/documentation/gp-data-formats.php)
-#[cfg(feature = "json")]
+#[cfg(all(feature = "json", feature = "std"))]
 pub fn to_omm_json_file(sgp4s: &[Sgp4], omm_json_file_path: &str) -> Result<(), GpError> {
     // Serialize the element sets and write the JSON file
     let omm_json_string = to_omm_json_string(sgp4s)?;
@@ -3118,8 +3129,8 @@ pub fn from_omm_csv_string(omm_csv_string: &str) -> Result<Vec<Sgp4>, GpError> {
 /// # Returns
 /// * A map of OMM keyword to text value
 #[cfg(feature = "csv")]
-fn csv_omm_fields(headers: &[String], record: &csv::StringRecord) -> HashMap<String, String> {
-    let mut fields = HashMap::new();
+fn csv_omm_fields(headers: &[String], record: &csv::StringRecord) -> BTreeMap<String, String> {
+    let mut fields = BTreeMap::new();
 
     for (index, header) in headers.iter().enumerate() {
         if header.is_empty() || header.eq_ignore_ascii_case("COMMENT") {
@@ -3427,6 +3438,9 @@ mod tests {
     use super::*;
     use serde::Deserialize;
     use std::collections::HashMap;
+    use std::format;
+    use std::string::{String, ToString};
+    use std::vec::Vec;
     use toml::from_str;
 
     /// Reject a TLE whose two data lines name different catalog numbers
@@ -3448,6 +3462,7 @@ mod tests {
     ///
     /// # Panics
     /// * If the missing file returns anything other than an I/O error
+    #[cfg(feature = "std")]
     #[test]
     fn test_tle_file_io_error() {
         let err = match from_tle_file("test/this_tle_file_does_not_exist.txt") {
@@ -3673,6 +3688,7 @@ mod tests {
     ///
     /// # Panics
     /// * If the missing file returns anything other than an I/O error
+    #[cfg(feature = "std")]
     #[test]
     fn test_omm_file_io_error() {
         let err = match from_omm_kvn_file("test/this_omm_file_does_not_exist.txt") {
@@ -4085,7 +4101,7 @@ mod tests {
         let cases: ParsingCases =
             from_str(&content).expect("could not parse test/tle_parsing_cases.toml");
 
-        let from_file = from_tle_file("test/tle_parsing_cases.txt")
+        let from_file = from_tle_string(&read_fixture("test/tle_parsing_cases.txt"))
             .expect("could not read test/tle_parsing_cases.txt");
         let expected_file_count = cases.test.values().filter(|c| !c.exception).count();
         assert_eq!(
@@ -4242,7 +4258,7 @@ mod tests {
     #[test]
     fn test_omm_kvn_parsing_cases() {
         let cases = load_omm_parsing_cases();
-        let from_file = from_omm_kvn_file("test/omm_parsing_cases.txt")
+        let from_file = from_omm_kvn_string(&read_fixture("test/omm_parsing_cases.txt"))
             .expect("could not parse test/omm_parsing_cases.txt");
         let expected_file_count = cases.test.values().filter(|c| !c.exception).count();
         assert_eq!(
@@ -4317,12 +4333,12 @@ mod tests {
     #[test]
     fn test_omm_xml_parsing_cases() {
         let cases = load_omm_parsing_cases();
-        let from_xml_file = from_omm_xml_file("test/omm_parsing_cases.xml")
+        let from_xml_file = from_omm_xml_string(&read_fixture("test/omm_parsing_cases.xml"))
             .expect("could not parse test/omm_parsing_cases.xml");
         assert_omm_file_matches_cases(
             &cases,
             &from_xml_file,
-            "from_omm_xml_file",
+            "from_omm_xml_string",
             "omm_parsing_cases.xml",
         );
     }
@@ -4335,12 +4351,12 @@ mod tests {
     #[test]
     fn test_omm_json_parsing_cases() {
         let cases = load_omm_parsing_cases();
-        let from_json_file = from_omm_json_file("test/omm_parsing_cases.json")
+        let from_json_file = from_omm_json_string(&read_fixture("test/omm_parsing_cases.json"))
             .expect("could not parse test/omm_parsing_cases.json");
         assert_omm_file_matches_cases(
             &cases,
             &from_json_file,
-            "from_omm_json_file",
+            "from_omm_json_string",
             "omm_parsing_cases.json",
         );
     }
@@ -4472,6 +4488,23 @@ mod tests {
         );
     }
 
+    /// Read a test fixture file into a string
+    ///
+    /// Fixtures are parsed with the string parsers so these tests also run
+    /// without the `std` feature.
+    ///
+    /// # Arguments
+    /// * `path` - Fixture path relative to the crate root
+    ///
+    /// # Returns
+    /// * `String` - The fixture contents
+    ///
+    /// # Panics
+    /// * If the file cannot be read
+    fn read_fixture(path: &str) -> String {
+        std::fs::read_to_string(path).unwrap_or_else(|err| panic!("could not read {path}: {err}"))
+    }
+
     /// Create the export directory and return a path inside it
     ///
     /// # Arguments
@@ -4482,6 +4515,7 @@ mod tests {
     ///
     /// # Panics
     /// * If the directory cannot be created or the path is not valid UTF-8
+    #[cfg(feature = "std")]
     fn export_test_path(file_name: &str) -> String {
         let dir = std::path::Path::new("test/export");
         std::fs::create_dir_all(dir).expect("could not create test/export");
@@ -4509,7 +4543,7 @@ mod tests {
     #[test]
     fn test_omm_kvn_export_string_roundtrip() {
         // Parse the KVN test file, export, and parse the export
-        let original = from_omm_kvn_file("test/omm_parsing_cases.txt")
+        let original = from_omm_kvn_string(&read_fixture("test/omm_parsing_cases.txt"))
             .expect("could not parse test/omm_parsing_cases.txt");
         let exported = to_omm_kvn_string(&original);
         let reparsed = from_omm_kvn_string(&exported).unwrap();
@@ -4524,10 +4558,11 @@ mod tests {
     ///
     /// # Panics
     /// * If the file cannot be written or a field differs
+    #[cfg(feature = "std")]
     #[test]
     fn test_omm_kvn_export_file_roundtrip() {
         // Parse the KVN test file and write it back out
-        let original = from_omm_kvn_file("test/omm_parsing_cases.txt")
+        let original = from_omm_kvn_string(&read_fixture("test/omm_parsing_cases.txt"))
             .expect("could not parse test/omm_parsing_cases.txt");
         let out_path = export_test_path("omm_kvn.txt");
         to_omm_kvn_file(&original, &out_path).expect("could not write exported KVN file");
@@ -4562,7 +4597,7 @@ mod tests {
     #[test]
     fn test_omm_xml_export_string_roundtrip() {
         // Parse the XML test file, export, and parse the export
-        let original = from_omm_xml_file("test/omm_parsing_cases.xml")
+        let original = from_omm_xml_string(&read_fixture("test/omm_parsing_cases.xml"))
             .expect("could not parse test/omm_parsing_cases.xml");
         let exported = to_omm_xml_string(&original);
         let reparsed = from_omm_xml_string(&exported).unwrap();
@@ -4577,11 +4612,11 @@ mod tests {
     ///
     /// # Panics
     /// * If the file cannot be written or a field differs
-    #[cfg(feature = "xml")]
+    #[cfg(all(feature = "xml", feature = "std"))]
     #[test]
     fn test_omm_xml_export_file_roundtrip() {
         // Parse the XML test file and write it back out
-        let original = from_omm_xml_file("test/omm_parsing_cases.xml")
+        let original = from_omm_xml_string(&read_fixture("test/omm_parsing_cases.xml"))
             .expect("could not parse test/omm_parsing_cases.xml");
         let out_path = export_test_path("omm_xml.xml");
         to_omm_xml_file(&original, &out_path).expect("could not write exported XML file");
@@ -4616,7 +4651,7 @@ mod tests {
     #[test]
     fn test_omm_json_export_string_roundtrip() {
         // Parse the JSON test file, export, and parse the export
-        let original = from_omm_json_file("test/omm_parsing_cases.json")
+        let original = from_omm_json_string(&read_fixture("test/omm_parsing_cases.json"))
             .expect("could not parse test/omm_parsing_cases.json");
         let exported = to_omm_json_string(&original).unwrap();
         let reparsed = from_omm_json_string(&exported).unwrap();
@@ -4631,11 +4666,11 @@ mod tests {
     ///
     /// # Panics
     /// * If the file cannot be written or a field differs
-    #[cfg(feature = "json")]
+    #[cfg(all(feature = "json", feature = "std"))]
     #[test]
     fn test_omm_json_export_file_roundtrip() {
         // Parse the JSON test file and write it back out
-        let original = from_omm_json_file("test/omm_parsing_cases.json")
+        let original = from_omm_json_string(&read_fixture("test/omm_parsing_cases.json"))
             .expect("could not parse test/omm_parsing_cases.json");
         let out_path = export_test_path("omm_json.json");
         to_omm_json_file(&original, &out_path).expect("could not write exported JSON file");
@@ -4721,7 +4756,7 @@ mod tests {
     #[test]
     fn test_tle_export_string_roundtrip() {
         // Parse the TLE test file, export, and parse the export
-        let original = from_tle_file("test/tle_parsing_cases.txt")
+        let original = from_tle_string(&read_fixture("test/tle_parsing_cases.txt"))
             .expect("could not read test/tle_parsing_cases.txt");
         let exported = to_tle_string(&original).expect("TLE export should succeed");
         let reparsed = from_tle_string(&exported).expect("exported TLE string should parse");
@@ -4736,10 +4771,11 @@ mod tests {
     ///
     /// # Panics
     /// * If the file cannot be written or a field differs
+    #[cfg(feature = "std")]
     #[test]
     fn test_tle_export_file_roundtrip() {
         // Parse the TLE test file and write it back out
-        let original = from_tle_file("test/tle_parsing_cases.txt")
+        let original = from_tle_string(&read_fixture("test/tle_parsing_cases.txt"))
             .expect("could not read test/tle_parsing_cases.txt");
         let out_path = export_test_path("tle.txt");
         to_tle_file(&original, &out_path).expect("TLE file export should succeed");
@@ -4763,7 +4799,7 @@ mod tests {
     #[test]
     fn test_tle_export_line_format() {
         // Exported data lines must be 69 characters and pass the checksum
-        let original = from_tle_file("test/tle_parsing_cases.txt")
+        let original = from_tle_string(&read_fixture("test/tle_parsing_cases.txt"))
             .expect("could not read test/tle_parsing_cases.txt");
         let exported = to_tle_string(&original).expect("TLE export should succeed");
 

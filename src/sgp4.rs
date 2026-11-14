@@ -3,13 +3,14 @@
 // ------------------
 // External Libraries
 // ------------------
-use std::f64::consts::PI;
+use core::f64::consts::PI;
 
 // ------------------
 // Internal Libraries
 // ------------------
 use crate::common::{CoordinateFrame, StateVector, WGS72, Wgs, calc_period, deg2rad};
 use crate::gp::GenPerturbElementSet;
+use crate::math::{abs, atan2, cos, floor, powf, powi, rem_euclid, sin, sqrt};
 use crate::time::{DateError, DateTime, utc2jday};
 
 // -------
@@ -639,16 +640,16 @@ pub fn init_sgp4(gp: &GenPerturbElementSet, wgs: Option<&Wgs>) -> Result<Sgp4, S
     let (jd0, jdfrac0) = utc2jday(&gp.epoch_datetime).map_err(Sgp4Error::InvalidDateTime)?;
 
     // Recover Brouwer mean motion from Kozai mean motion (mean motion in GP)
-    let theta0 = i0.cos();
-    let beta0 = (1. - e0.powi(2)).sqrt();
-    let a1 = (wgs_sgp4.ke / n0_kozai).powf(2. / 3.);
-    let delta1 = (3. / 2.) * (wgs_sgp4.k2 / a1.powf(2.)) * (3. * i0.cos().powf(2.) - 1.)
-        / (1. - e0.powf(2.)).powf(3. / 2.);
-    let a2 = a1 * (1. - (1. / 3.) * delta1 - delta1.powf(2.) - (134. / 81.) * delta1.powf(3.));
-    let delta0 = (3. / 2.) * (wgs_sgp4.k2 / a2.powf(2.)) * (3. * i0.cos().powf(2.) - 1.)
-        / (1. - e0.powf(2.)).powf(3. / 2.);
+    let theta0 = cos(i0);
+    let beta0 = sqrt(1. - powi(e0, 2));
+    let a1 = powf(wgs_sgp4.ke / n0_kozai, 2. / 3.);
+    let delta1 = (3. / 2.) * (wgs_sgp4.k2 / powf(a1, 2.)) * (3. * powf(cos(i0), 2.) - 1.)
+        / powf(1. - powf(e0, 2.), 3. / 2.);
+    let a2 = a1 * (1. - (1. / 3.) * delta1 - powf(delta1, 2.) - (134. / 81.) * powf(delta1, 3.));
+    let delta0 = (3. / 2.) * (wgs_sgp4.k2 / powf(a2, 2.)) * (3. * powf(cos(i0), 2.) - 1.)
+        / powf(1. - powf(e0, 2.), 3. / 2.);
     let n0 = n0_kozai / (1. + delta0); // [rad/min]
-    let a0 = (wgs_sgp4.ke / n0).powf(2. / 3.); // [Earth radii]
+    let a0 = powf(wgs_sgp4.ke / n0, 2. / 3.); // [Earth radii]
     let a0_km = a0 * wgs_sgp4.r_earth_eq; // [km]
     let period0 = calc_period(a0_km, wgs_sgp4.mu); // [min]
 
@@ -775,21 +776,21 @@ fn init_atm_effects(
     // Calculate atmospheric drag parameters
     let zeta = 1. / (brouwer0.a - s);
     let eta = brouwer0.a * brouwer0.e * zeta;
-    let psisq = (1. - eta.powi(2)).abs(); // Vallado uses abs to handle the case when eta > 1 (sub-orbital / decayed orbits)
+    let psisq = abs(1. - powi(eta, 2)); // Vallado uses abs to handle the case when eta > 1 (sub-orbital / decayed orbits)
 
-    let c2_1 = (q0 - s).powi(4) * zeta.powi(4) * brouwer0.n * psisq.powf(-3.5);
+    let c2_1 = powi(q0 - s, 4) * powi(zeta, 4) * brouwer0.n * powf(psisq, -3.5);
     let c2_2 = brouwer0.a
-        * (1. + (3. / 2.) * eta.powi(2) + 4. * brouwer0.e * eta + brouwer0.e * eta.powi(3));
+        * (1. + (3. / 2.) * powi(eta, 2) + 4. * brouwer0.e * eta + brouwer0.e * powi(eta, 3));
     let c2_3 = (3. / 2.)
         * (wgs.k2 * zeta / psisq)
-        * (-(1. / 2.) + (3. / 2.) * brouwer0.theta.powi(2))
-        * (8. + 24. * eta.powi(2) + 3. * eta.powi(4));
+        * (-(1. / 2.) + (3. / 2.) * powi(brouwer0.theta, 2))
+        * (8. + 24. * powi(eta, 2) + 3. * powi(eta, 4));
     let c2 = c2_1 * (c2_2 + c2_3);
 
     let c1 = gp.bstar * c2;
     // Vallado drop C3 when eccentricity is too small (avoids /e blow-up)
     let c3 = if brouwer0.e > 1.0e-4 {
-        ((q0 - s).powf(4.) * zeta.powf(5.) * a30 * brouwer0.n * brouwer0.i.sin())
+        (powf(q0 - s, 4.) * powf(zeta, 5.) * a30 * brouwer0.n * sin(brouwer0.i))
             / (wgs.k2 * brouwer0.e)
     } else {
         0.0
@@ -797,35 +798,35 @@ fn init_atm_effects(
 
     let c4_1 = 2.
         * brouwer0.n
-        * (q0 - s).powi(4)
-        * zeta.powi(4)
+        * powi(q0 - s, 4)
+        * powi(zeta, 4)
         * brouwer0.a
-        * brouwer0.beta.powi(2)
-        * psisq.powf(-3.5);
-    let c4_2 = 2. * eta * (1. + brouwer0.e * eta) + 0.5 * brouwer0.e + 0.5 * eta.powi(3);
+        * powi(brouwer0.beta, 2)
+        * powf(psisq, -3.5);
+    let c4_2 = 2. * eta * (1. + brouwer0.e * eta) + 0.5 * brouwer0.e + 0.5 * powi(eta, 3);
     let c4_3 = 2. * wgs.k2 * zeta / (brouwer0.a * psisq);
     let c4_4 = 3.
-        * (1. - 3. * brouwer0.theta.powi(2))
-        * (1. + 3. / 2. * eta.powi(2) - 2. * brouwer0.e * eta - 0.5 * brouwer0.e * eta.powi(3));
+        * (1. - 3. * powi(brouwer0.theta, 2))
+        * (1. + 3. / 2. * powi(eta, 2) - 2. * brouwer0.e * eta - 0.5 * brouwer0.e * powi(eta, 3));
     let c4_5 = 3. / 4.
-        * (1. - brouwer0.theta.powi(2))
-        * (2. * eta.powi(2) - brouwer0.e * eta - brouwer0.e * eta.powi(3))
-        * (2. * brouwer0.omega).cos();
+        * (1. - powi(brouwer0.theta, 2))
+        * (2. * powi(eta, 2) - brouwer0.e * eta - brouwer0.e * powi(eta, 3))
+        * cos(2. * brouwer0.omega);
     let c4 = c4_1 * (c4_2 - c4_3 * (c4_4 + c4_5));
 
     let c5_1 = 2.
-        * (q0 - s).powi(4)
-        * zeta.powi(4)
+        * powi(q0 - s, 4)
+        * powi(zeta, 4)
         * brouwer0.a
-        * brouwer0.beta.powi(2)
-        * psisq.powf(-3.5);
-    let c5_2 = 1. + 11. / 4. * eta * (eta + brouwer0.e) + brouwer0.e * eta.powi(3);
+        * powi(brouwer0.beta, 2)
+        * powf(psisq, -3.5);
+    let c5_2 = 1. + 11. / 4. * eta * (eta + brouwer0.e) + brouwer0.e * powi(eta, 3);
     let c5 = c5_1 * c5_2;
 
-    let d2 = 4. * brouwer0.a * zeta * c1.powi(2);
-    let d3 = 4. / 3. * brouwer0.a * zeta.powi(2) * (17. * brouwer0.a + s) * c1.powi(3);
+    let d2 = 4. * brouwer0.a * zeta * powi(c1, 2);
+    let d3 = 4. / 3. * brouwer0.a * powi(zeta, 2) * (17. * brouwer0.a + s) * powi(c1, 3);
     let d4 =
-        2. / 3. * brouwer0.a.powi(2) * zeta.powi(3) * (221. * brouwer0.a + 31. * s) * c1.powi(4);
+        2. / 3. * powi(brouwer0.a, 2) * powi(zeta, 3) * (221. * brouwer0.a + 31. * s) * powi(c1, 4);
 
     // Store atmospheric drag parameters
     AtmDragParams {
@@ -862,28 +863,30 @@ fn init_atm_effects(
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
 fn init_zonal_effects(wgs: &Wgs, brouwer0: &BrouwerMeanElements) -> EarthZonalParams {
     // Calculate orbital element rates of change due to zonal harmonics
-    let m_dot_1 = 3. * wgs.k2 * (-1. + 3. * brouwer0.theta.powi(2))
-        / (2. * brouwer0.a.powi(2) * brouwer0.beta.powi(3));
-    let m_dot_2 =
-        3. * wgs.k2.powi(2) * (13. - 78. * brouwer0.theta.powi(2) + 137. * brouwer0.theta.powi(4))
-            / (16. * brouwer0.a.powi(4) * brouwer0.beta.powi(7));
+    let m_dot_1 = 3. * wgs.k2 * (-1. + 3. * powi(brouwer0.theta, 2))
+        / (2. * powi(brouwer0.a, 2) * powi(brouwer0.beta, 3));
+    let m_dot_2 = 3.
+        * powi(wgs.k2, 2)
+        * (13. - 78. * powi(brouwer0.theta, 2) + 137. * powi(brouwer0.theta, 4))
+        / (16. * powi(brouwer0.a, 4) * powi(brouwer0.beta, 7));
     let m_dot = (m_dot_1 + m_dot_2) * brouwer0.n;
 
-    let omega_dot_1 = -3. * wgs.k2 * (1. - 5. * brouwer0.theta.powi(2))
-        / (2. * brouwer0.a.powi(2) * brouwer0.beta.powi(4));
-    let omega_dot_2 =
-        3. * wgs.k2.powi(2) * (7. - 114. * brouwer0.theta.powi(2) + 395. * brouwer0.theta.powi(4))
-            / (16. * brouwer0.a.powi(4) * brouwer0.beta.powi(8));
+    let omega_dot_1 = -3. * wgs.k2 * (1. - 5. * powi(brouwer0.theta, 2))
+        / (2. * powi(brouwer0.a, 2) * powi(brouwer0.beta, 4));
+    let omega_dot_2 = 3.
+        * powi(wgs.k2, 2)
+        * (7. - 114. * powi(brouwer0.theta, 2) + 395. * powi(brouwer0.theta, 4))
+        / (16. * powi(brouwer0.a, 4) * powi(brouwer0.beta, 8));
     let omega_dot_3 =
-        5. * wgs.k4 * (3. - 36. * brouwer0.theta.powi(2) + 49. * brouwer0.theta.powi(4))
-            / (4. * brouwer0.a.powi(4) * brouwer0.beta.powi(8));
+        5. * wgs.k4 * (3. - 36. * powi(brouwer0.theta, 2) + 49. * powi(brouwer0.theta, 4))
+            / (4. * powi(brouwer0.a, 4) * powi(brouwer0.beta, 8));
     let omega_dot = (omega_dot_1 + omega_dot_2 + omega_dot_3) * brouwer0.n;
 
-    let raan_dot_1 = -3. * wgs.k2 * brouwer0.theta / (brouwer0.a.powi(2) * brouwer0.beta.powi(4));
-    let raan_dot_2 = 3. * wgs.k2.powi(2) * (4. * brouwer0.theta - 19. * brouwer0.theta.powi(3))
-        / (2. * brouwer0.a.powi(4) * brouwer0.beta.powi(8));
-    let raan_dot_3 = 5. * wgs.k4 * brouwer0.theta * (3. - 7. * brouwer0.theta.powi(2))
-        / (2. * brouwer0.a.powi(4) * brouwer0.beta.powi(8));
+    let raan_dot_1 = -3. * wgs.k2 * brouwer0.theta / (powi(brouwer0.a, 2) * powi(brouwer0.beta, 4));
+    let raan_dot_2 = 3. * powi(wgs.k2, 2) * (4. * brouwer0.theta - 19. * powi(brouwer0.theta, 3))
+        / (2. * powi(brouwer0.a, 4) * powi(brouwer0.beta, 8));
+    let raan_dot_3 = 5. * wgs.k4 * brouwer0.theta * (3. - 7. * powi(brouwer0.theta, 2))
+        / (2. * powi(brouwer0.a, 4) * powi(brouwer0.beta, 8));
     let raan_dot = (raan_dot_1 + raan_dot_2 + raan_dot_3) * brouwer0.n;
 
     // Store Earth zonal parameters
@@ -986,36 +989,36 @@ fn init_lunar_solar_effects(
     let delta_t = jd0 + jdfrac0 - epoch_sm;
 
     // Calculate the Lunar RAAN wrt to the ecliptic plane at TLE epoch
-    let raan_me = (raan_me0 + raan_me0_dot * delta_t).rem_euclid(2.0 * PI);
-    let sin_raan_me = raan_me.sin();
-    let cos_raan_me = raan_me.cos();
+    let raan_me = rem_euclid(raan_me0 + raan_me0_dot * delta_t, 2.0 * PI);
+    let sin_raan_me = sin(raan_me);
+    let cos_raan_me = cos(raan_me);
 
     // Lunar equatorial inclination (Spacetrack/Hoots legacy linearization of the
     // ecliptic-to-equatorial transform - not the exact acos form)
     let cos_i_m = 0.91375164 - 0.03568096 * cos_raan_me;
-    let sin_i_m = (1.0 - cos_i_m * cos_i_m).sqrt();
+    let sin_i_m = sqrt(1.0 - cos_i_m * cos_i_m);
 
     // Calculate the Lunar longitude of perigee referred to the ecliptic
     let gamma_m = u_me0 + u_me0_dot * delta_t;
 
     // Lunar ascending-node trig in the equatorial frame (legacy SDP4)
     let sin_raan_m = 0.089683511 * sin_raan_me / sin_i_m;
-    let cos_raan_m = (1.0 - sin_raan_m * sin_raan_m).sqrt();
-    let raan_m = sin_raan_m.atan2(cos_raan_m);
+    let cos_raan_m = sqrt(1.0 - sin_raan_m * sin_raan_m);
+    let raan_m = atan2(sin_raan_m, cos_raan_m);
 
     // Lunar argument of periapsis (legacy SDP4 zx formulation)
     let mut zx = 0.39785416 * sin_raan_me / sin_i_m;
     let zy = cos_raan_m * cos_raan_me + 0.91744867 * sin_raan_m * sin_raan_me;
-    zx = zx.atan2(zy);
+    zx = atan2(zx, zy);
     let omega_m = gamma_m + zx - raan_me;
-    let sin_omega_m = omega_m.sin();
-    let cos_omega_m = omega_m.cos();
+    let sin_omega_m = sin(omega_m);
+    let cos_omega_m = cos(omega_m);
 
     // Calculate the Lunar mean anomaly \[rad\]
-    let m_m = (m_m0 + m_m0_dot * delta_t - gamma_m).rem_euclid(2.0 * PI);
+    let m_m = rem_euclid(m_m0 + m_m0_dot * delta_t - gamma_m, 2.0 * PI);
 
     // Calculate the Solar mean anomaly \[rad\]
-    let m_s = (m_s0 + m_s0_dot * delta_t).rem_euclid(2.0 * PI);
+    let m_s = rem_euclid(m_s0 + m_s0_dot * delta_t, 2.0 * PI);
 
     // Calculate the Lunar secular rates
     let lunar_params = calc_lunar_solar_secular_rates(
@@ -1078,13 +1081,13 @@ fn calc_lunar_solar_secular_rates(
     brouwer0: &BrouwerMeanElements,
 ) -> ThirdBodyParams {
     // Precompute common quantities
-    let cos_raan_diff = (brouwer0.raan - body.raan).cos();
-    let sin_raan_diff = (brouwer0.raan - body.raan).sin();
-    let cos_omega0 = brouwer0.omega.cos();
-    let sin_omega0 = brouwer0.omega.sin();
-    let cos_i0 = brouwer0.i.cos();
-    let sin_i0 = brouwer0.i.sin();
-    let beta_x = (1. - body.e.powi(2)).sqrt();
+    let cos_raan_diff = cos(brouwer0.raan - body.raan);
+    let sin_raan_diff = sin(brouwer0.raan - body.raan);
+    let cos_omega0 = cos(brouwer0.omega);
+    let sin_omega0 = sin(brouwer0.omega);
+    let cos_i0 = cos(brouwer0.i);
+    let sin_i0 = sin(brouwer0.i);
+    let beta_x = sqrt(1. - powi(body.e, 2));
 
     // Calculate 3rd body constants
     let a1 = body.cos_omega * cos_raan_diff + body.sin_omega * body.cos_i * sin_raan_diff;
@@ -1107,22 +1110,22 @@ fn calc_lunar_solar_secular_rates(
     let x7 = a5 * cos_omega0;
     let x8 = a6 * cos_omega0;
 
-    let z31 = 12. * x1.powi(2) - 3. * x3.powi(2);
+    let z31 = 12. * powi(x1, 2) - 3. * powi(x3, 2);
     let z32 = 24. * x1 * x2 - 6. * x3 * x4;
-    let z33 = 12. * x2.powi(2) - 3. * x4.powi(2);
-    let z1 = 6. * (a1.powi(2) + a2.powi(2)) + (1. + brouwer0.e.powi(2)) * z31;
-    let z2 = 12. * (a1 * a3 + a2 * a4) + (1. + brouwer0.e.powi(2)) * z32;
-    let z3 = 6. * (a3.powi(2) + a4.powi(2)) + (1. + brouwer0.e.powi(2)) * z33;
-    let z11 = -6. * a1 * a5 + brouwer0.e.powi(2) * (-24. * x1 * x7 - 6. * x3 * x5);
-    let z13 = -6. * a3 * a6 + brouwer0.e.powi(2) * (-24. * x2 * x8 - 6. * x4 * x6);
-    let z21 = 6. * a2 * a5 + brouwer0.e.powi(2) * (24. * x1 * x5 - 6. * x3 * x7);
-    let z23 = 6. * a4 * a6 + brouwer0.e.powi(2) * (24. * x2 * x6 - 6. * x4 * x8);
+    let z33 = 12. * powi(x2, 2) - 3. * powi(x4, 2);
+    let z1 = 6. * (powi(a1, 2) + powi(a2, 2)) + (1. + powi(brouwer0.e, 2)) * z31;
+    let z2 = 12. * (a1 * a3 + a2 * a4) + (1. + powi(brouwer0.e, 2)) * z32;
+    let z3 = 6. * (powi(a3, 2) + powi(a4, 2)) + (1. + powi(brouwer0.e, 2)) * z33;
+    let z11 = -6. * a1 * a5 + powi(brouwer0.e, 2) * (-24. * x1 * x7 - 6. * x3 * x5);
+    let z13 = -6. * a3 * a6 + powi(brouwer0.e, 2) * (-24. * x2 * x8 - 6. * x4 * x6);
+    let z21 = 6. * a2 * a5 + powi(brouwer0.e, 2) * (24. * x1 * x5 - 6. * x3 * x7);
+    let z23 = 6. * a4 * a6 + powi(brouwer0.e, 2) * (24. * x2 * x6 - 6. * x4 * x8);
     let z22 = 6. * a4 * a5
         + 6. * a2 * a6
-        + brouwer0.e.powi(2) * (24. * x2 * x5 + 24. * x1 * x6 - 6. * x4 * x7 - 6. * x3 * x8);
+        + powi(brouwer0.e, 2) * (24. * x2 * x5 + 24. * x1 * x6 - 6. * x4 * x7 - 6. * x3 * x8);
     let z12 = -6. * a1 * a6
         - 6. * a3 * a5
-        - brouwer0.e.powi(2) * (24. * x2 * x7 + 24. * x1 * x8 + 6. * x3 * x6 + 6. * x4 * x5);
+        - powi(brouwer0.e, 2) * (24. * x2 * x7 + 24. * x1 * x8 + 6. * x3 * x6 + 6. * x4 * x5);
 
     // Calculate secular rates
     let e_x_dot =
@@ -1130,7 +1133,7 @@ fn calc_lunar_solar_secular_rates(
 
     let i_x_dot = (-body.c * body.n / (2. * brouwer0.n * brouwer0.beta)) * (z11 + z13);
 
-    let m_x_dot = (-body.c * body.n / brouwer0.n) * (z1 + z3 - 14. - 6. * brouwer0.e.powi(2));
+    let m_x_dot = (-body.c * body.n / brouwer0.n) * (z1 + z3 - 14. - 6. * powi(brouwer0.e, 2));
 
     // Neglect the RAAN rate within 3 deg of 0 or 180 deg inclination to avoid dividing by sin(i) (Vallado sgp4fix for 180 deg incl)
     let raan_rate_valid = brouwer0.i >= deg2rad(3.) && brouwer0.i <= PI - deg2rad(3.);
@@ -1206,8 +1209,8 @@ fn init_earth_gravity_resonance_halfday(
     solar_params: &ThirdBodyParams,
 ) -> HalfDayResonanceParams {
     // Precompute common quantities
-    let cos_i0 = brouwer0.i.cos();
-    let sin_i0 = brouwer0.i.sin();
+    let cos_i0 = cos(brouwer0.i);
+    let sin_i0 = sin(brouwer0.i);
 
     // Define constants
     let c22s22 = 1.7891679e-6;
@@ -1217,26 +1220,28 @@ fn init_earth_gravity_resonance_halfday(
     let c54s54 = 2.1765803e-9;
 
     // Calculate functions of inclination
-    let f220 = (3. / 4.) * (1. + cos_i0).powi(2);
-    let f221 = (3. / 2.) * sin_i0.powi(2);
-    let f321 = (15. / 8.) * sin_i0 * (1. - 2. * cos_i0 - 3. * cos_i0.powi(2));
-    let f322 = (-15. / 8.) * sin_i0 * (1. + 2. * cos_i0 - 3. * cos_i0.powi(2));
-    let f441 = (105. / 4.) * sin_i0.powi(2) * (1. + cos_i0).powi(2);
-    let f442 = (315. / 8.) * sin_i0.powi(4);
+    let f220 = (3. / 4.) * powi(1. + cos_i0, 2);
+    let f221 = (3. / 2.) * powi(sin_i0, 2);
+    let f321 = (15. / 8.) * sin_i0 * (1. - 2. * cos_i0 - 3. * powi(cos_i0, 2));
+    let f322 = (-15. / 8.) * sin_i0 * (1. + 2. * cos_i0 - 3. * powi(cos_i0, 2));
+    let f441 = (105. / 4.) * powi(sin_i0, 2) * powi(1. + cos_i0, 2);
+    let f442 = (315. / 8.) * powi(sin_i0, 4);
     let f522 = (315. / 32.)
-        * (sin_i0.powi(3) - 2. * sin_i0.powi(3) * cos_i0 - 5. * sin_i0.powi(3) * cos_i0.powi(2)
-            + sin_i0 * ((-2. / 3.) + (4. / 3.) * cos_i0 + 2. * cos_i0.powi(2)));
+        * (powi(sin_i0, 3)
+            - 2. * powi(sin_i0, 3) * cos_i0
+            - 5. * powi(sin_i0, 3) * powi(cos_i0, 2)
+            + sin_i0 * ((-2. / 3.) + (4. / 3.) * cos_i0 + 2. * powi(cos_i0, 2)));
     let f523 = (105. / 16.)
         * sin_i0
         * (1. + 2. * cos_i0
-            - 3. * cos_i0.powi(2)
-            - (3. / 2.) * sin_i0.powi(2) * (1. + 2. * cos_i0 - 5. * cos_i0.powi(2)));
+            - 3. * powi(cos_i0, 2)
+            - (3. / 2.) * powi(sin_i0, 2) * (1. + 2. * cos_i0 - 5. * powi(cos_i0, 2)));
     let f542 = (945. / 32.)
         * sin_i0
-        * (2. - 8. * cos_i0 + cos_i0.powi(2) * (-12. + 8. * cos_i0 + 10. * cos_i0.powi(2)));
+        * (2. - 8. * cos_i0 + powi(cos_i0, 2) * (-12. + 8. * cos_i0 + 10. * powi(cos_i0, 2)));
     let f543 = (945. / 32.)
         * sin_i0
-        * (cos_i0.powi(2) * (12. + 8. * cos_i0 - 10. * cos_i0.powi(2)) - 2. - 8. * cos_i0);
+        * (powi(cos_i0, 2) * (12. + 8. * cos_i0 - 10. * powi(cos_i0, 2)) - 2. - 8. * cos_i0);
 
     // Calculate functions of eccentricity
     let g211: f64;
@@ -1250,66 +1255,66 @@ fn init_earth_gravity_resonance_halfday(
     let g532: f64;
     let g533: f64;
     if brouwer0.e <= 0.65 {
-        g211 = 3.616 - 13.247 * brouwer0.e + 16.29 * brouwer0.e.powi(2);
-        g310 = -19.302 + 117.39 * brouwer0.e - 228.419 * brouwer0.e.powi(2)
-            + 156.591 * brouwer0.e.powi(3);
-        g322 = -18.9068 + 109.7927 * brouwer0.e - 214.6334 * brouwer0.e.powi(2)
-            + 146.5816 * brouwer0.e.powi(3);
-        g410 = -41.122 + 242.694 * brouwer0.e - 471.094 * brouwer0.e.powi(2)
-            + 313.953 * brouwer0.e.powi(3);
-        g422 = -146.407 + 841.88 * brouwer0.e - 1629.014 * brouwer0.e.powi(2)
-            + 1083.435 * brouwer0.e.powi(3);
-        g520 = -532.114 + 3017.977 * brouwer0.e - 5740.032 * brouwer0.e.powi(2)
-            + 3708.276 * brouwer0.e.powi(3);
+        g211 = 3.616 - 13.247 * brouwer0.e + 16.29 * powi(brouwer0.e, 2);
+        g310 = -19.302 + 117.39 * brouwer0.e - 228.419 * powi(brouwer0.e, 2)
+            + 156.591 * powi(brouwer0.e, 3);
+        g322 = -18.9068 + 109.7927 * brouwer0.e - 214.6334 * powi(brouwer0.e, 2)
+            + 146.5816 * powi(brouwer0.e, 3);
+        g410 = -41.122 + 242.694 * brouwer0.e - 471.094 * powi(brouwer0.e, 2)
+            + 313.953 * powi(brouwer0.e, 3);
+        g422 = -146.407 + 841.88 * brouwer0.e - 1629.014 * powi(brouwer0.e, 2)
+            + 1083.435 * powi(brouwer0.e, 3);
+        g520 = -532.114 + 3017.977 * brouwer0.e - 5740.032 * powi(brouwer0.e, 2)
+            + 3708.276 * powi(brouwer0.e, 3);
     } else {
-        g211 = -72.099 + 331.819 * brouwer0.e - 508.738 * brouwer0.e.powi(2)
-            + 266.724 * brouwer0.e.powi(3);
-        g310 = -346.844 + 1582.851 * brouwer0.e - 2415.925 * brouwer0.e.powi(2)
-            + 1246.113 * brouwer0.e.powi(3);
-        g322 = -342.585 + 1554.908 * brouwer0.e - 2366.899 * brouwer0.e.powi(2)
-            + 1215.972 * brouwer0.e.powi(3);
-        g410 = -1052.797 + 4758.686 * brouwer0.e - 7193.992 * brouwer0.e.powi(2)
-            + 3651.957 * brouwer0.e.powi(3);
-        g422 = -3581.69 + 16178.11 * brouwer0.e - 24462.77 * brouwer0.e.powi(2)
-            + 12422.52 * brouwer0.e.powi(3);
+        g211 = -72.099 + 331.819 * brouwer0.e - 508.738 * powi(brouwer0.e, 2)
+            + 266.724 * powi(brouwer0.e, 3);
+        g310 = -346.844 + 1582.851 * brouwer0.e - 2415.925 * powi(brouwer0.e, 2)
+            + 1246.113 * powi(brouwer0.e, 3);
+        g322 = -342.585 + 1554.908 * brouwer0.e - 2366.899 * powi(brouwer0.e, 2)
+            + 1215.972 * powi(brouwer0.e, 3);
+        g410 = -1052.797 + 4758.686 * brouwer0.e - 7193.992 * powi(brouwer0.e, 2)
+            + 3651.957 * powi(brouwer0.e, 3);
+        g422 = -3581.69 + 16178.11 * brouwer0.e - 24462.77 * powi(brouwer0.e, 2)
+            + 12422.52 * powi(brouwer0.e, 3);
         if brouwer0.e < 0.715 {
-            g520 = 1464.74 - 4664.75 * brouwer0.e + 3763.64 * brouwer0.e.powi(2);
+            g520 = 1464.74 - 4664.75 * brouwer0.e + 3763.64 * powi(brouwer0.e, 2);
         } else {
-            g520 = -5149.66 + 29936.92 * brouwer0.e - 54087.36 * brouwer0.e.powi(2)
-                + 31324.56 * brouwer0.e.powi(3);
+            g520 = -5149.66 + 29936.92 * brouwer0.e - 54087.36 * powi(brouwer0.e, 2)
+                + 31324.56 * powi(brouwer0.e, 3);
         }
     }
     if brouwer0.e < 0.7 {
-        g521 = -822.71072 + 4568.6173 * brouwer0.e - 8491.4146 * brouwer0.e.powi(2)
-            + 5337.524 * brouwer0.e.powi(3);
-        g532 = -853.666 + 4690.25 * brouwer0.e - 8624.77 * brouwer0.e.powi(2)
-            + 5341.4 * brouwer0.e.powi(3);
-        g533 = -919.2277 + 4988.61 * brouwer0.e - 9064.77 * brouwer0.e.powi(2)
-            + 5542.21 * brouwer0.e.powi(3);
+        g521 = -822.71072 + 4568.6173 * brouwer0.e - 8491.4146 * powi(brouwer0.e, 2)
+            + 5337.524 * powi(brouwer0.e, 3);
+        g532 = -853.666 + 4690.25 * brouwer0.e - 8624.77 * powi(brouwer0.e, 2)
+            + 5341.4 * powi(brouwer0.e, 3);
+        g533 = -919.2277 + 4988.61 * brouwer0.e - 9064.77 * powi(brouwer0.e, 2)
+            + 5542.21 * powi(brouwer0.e, 3);
     } else {
-        g521 = -51752.104 + 218913.95 * brouwer0.e - 309468.16 * brouwer0.e.powi(2)
-            + 146349.42 * brouwer0.e.powi(3);
-        g532 = -40023.88 + 170470.89 * brouwer0.e - 242699.48 * brouwer0.e.powi(2)
-            + 115605.82 * brouwer0.e.powi(3);
-        g533 = -37995.78 + 161616.52 * brouwer0.e - 229838.2 * brouwer0.e.powi(2)
-            + 109377.94 * brouwer0.e.powi(3);
+        g521 = -51752.104 + 218913.95 * brouwer0.e - 309468.16 * powi(brouwer0.e, 2)
+            + 146349.42 * powi(brouwer0.e, 3);
+        g532 = -40023.88 + 170470.89 * brouwer0.e - 242699.48 * powi(brouwer0.e, 2)
+            + 115605.82 * powi(brouwer0.e, 3);
+        g533 = -37995.78 + 161616.52 * brouwer0.e - 229838.2 * powi(brouwer0.e, 2)
+            + 109377.94 * powi(brouwer0.e, 3);
     }
 
     // Calculate the quadruples
-    let d2201 = 3. * brouwer0.n.powi(2) / brouwer0.a.powi(2) * (c22s22 * f220 * g201);
-    let d2211 = 3. * brouwer0.n.powi(2) / brouwer0.a.powi(2) * (c22s22 * f221 * g211);
-    let d3210 = 3. * brouwer0.n.powi(2) / brouwer0.a.powi(3) * (c32s32 * f321 * g310);
-    let d3222 = 3. * brouwer0.n.powi(2) / brouwer0.a.powi(3) * (c32s32 * f322 * g322);
-    let d5220 = 3. * brouwer0.n.powi(2) / brouwer0.a.powi(5) * (c52s52 * f522 * g520);
-    let d5232 = 3. * brouwer0.n.powi(2) / brouwer0.a.powi(5) * (c52s52 * f523 * g532);
-    let d4422 = 6. * brouwer0.n.powi(2) / brouwer0.a.powi(4) * (c44s44 * f442 * g422); // 2x typo in Hoots et al 2004
-    let d5421 = 6. * brouwer0.n.powi(2) / brouwer0.a.powi(5) * (c54s54 * f542 * g521); // 2x typo in Hoots et al 2004
-    let d5433 = 6. * brouwer0.n.powi(2) / brouwer0.a.powi(5) * (c54s54 * f543 * g533); // Typo in Hoots et al 2004
-    let d4410 = 6. * brouwer0.n.powi(2) / brouwer0.a.powi(4) * (c44s44 * f441 * g410); // 2x typo in Hoots et al 2004
+    let d2201 = 3. * powi(brouwer0.n, 2) / powi(brouwer0.a, 2) * (c22s22 * f220 * g201);
+    let d2211 = 3. * powi(brouwer0.n, 2) / powi(brouwer0.a, 2) * (c22s22 * f221 * g211);
+    let d3210 = 3. * powi(brouwer0.n, 2) / powi(brouwer0.a, 3) * (c32s32 * f321 * g310);
+    let d3222 = 3. * powi(brouwer0.n, 2) / powi(brouwer0.a, 3) * (c32s32 * f322 * g322);
+    let d5220 = 3. * powi(brouwer0.n, 2) / powi(brouwer0.a, 5) * (c52s52 * f522 * g520);
+    let d5232 = 3. * powi(brouwer0.n, 2) / powi(brouwer0.a, 5) * (c52s52 * f523 * g532);
+    let d4422 = 6. * powi(brouwer0.n, 2) / powi(brouwer0.a, 4) * (c44s44 * f442 * g422); // 2x typo in Hoots et al 2004
+    let d5421 = 6. * powi(brouwer0.n, 2) / powi(brouwer0.a, 5) * (c54s54 * f542 * g521); // 2x typo in Hoots et al 2004
+    let d5433 = 6. * powi(brouwer0.n, 2) / powi(brouwer0.a, 5) * (c54s54 * f543 * g533); // Typo in Hoots et al 2004
+    let d4410 = 6. * powi(brouwer0.n, 2) / powi(brouwer0.a, 4) * (c44s44 * f441 * g410); // 2x typo in Hoots et al 2004
 
     // Calculate the initial value for the auxilary variable lam0
     let theta_g = calc_theta_g(jd0, jdfrac0);
-    let lam0 = (brouwer0.m + 2. * brouwer0.raan - 2. * theta_g).rem_euclid(2.0 * PI);
+    let lam0 = rem_euclid(brouwer0.m + 2. * brouwer0.raan - 2. * theta_g, 2.0 * PI);
     let lam0_dot = zonal_params.m_dot
         + (lunar_params.m_dot + solar_params.m_dot)
         + 2. * zonal_params.raan_dot
@@ -1364,8 +1369,8 @@ fn init_earth_gravity_resonance_wholeday(
     solar_params: &ThirdBodyParams,
 ) -> WholeDayResonanceParams {
     // Precompute common quantities
-    let cos_i0 = brouwer0.i.cos();
-    let sin_i0 = brouwer0.i.sin();
+    let cos_i0 = cos(brouwer0.i);
+    let sin_i0 = sin(brouwer0.i);
 
     // Define constants
     let q31 = 2.1460748e-6;
@@ -1376,19 +1381,19 @@ fn init_earth_gravity_resonance_wholeday(
     let lam33 = 0.37448087;
 
     // Calculate functions of inclination
-    let f220 = (3. / 4.) * (1. + cos_i0).powi(2);
-    let f311 = (15. / 16.) * sin_i0.powi(2) * (1. + 3. * cos_i0) - (3. / 4.) * (1. + cos_i0);
-    let f330 = (15. / 8.) * (1. + cos_i0).powi(3);
+    let f220 = (3. / 4.) * powi(1. + cos_i0, 2);
+    let f311 = (15. / 16.) * powi(sin_i0, 2) * (1. + 3. * cos_i0) - (3. / 4.) * (1. + cos_i0);
+    let f330 = (15. / 8.) * powi(1. + cos_i0, 3);
 
     // Calculate functions of eccentricity
-    let g200 = 1. - (5. / 2.) * brouwer0.e.powi(2) + (13. / 16.) * brouwer0.e.powi(4);
-    let g310 = 1. + 2. * brouwer0.e.powi(2);
-    let g300 = 1. - 6. * brouwer0.e.powi(2) + (423. / 64.) * brouwer0.e.powi(4);
+    let g200 = 1. - (5. / 2.) * powi(brouwer0.e, 2) + (13. / 16.) * powi(brouwer0.e, 4);
+    let g310 = 1. + 2. * powi(brouwer0.e, 2);
+    let g300 = 1. - 6. * powi(brouwer0.e, 2) + (423. / 64.) * powi(brouwer0.e, 4);
 
     // Calculate coefficients of the resonance terms
-    let delta1 = (3. * brouwer0.n.powi(2) / brouwer0.a.powi(3)) * f311 * g310 * q31;
-    let delta2 = (6. * brouwer0.n.powi(2) / brouwer0.a.powi(2)) * f220 * g200 * q22;
-    let delta3 = (9. * brouwer0.n.powi(2) / brouwer0.a.powi(3)) * f330 * g300 * q33;
+    let delta1 = (3. * powi(brouwer0.n, 2) / powi(brouwer0.a, 3)) * f311 * g310 * q31;
+    let delta2 = (6. * powi(brouwer0.n, 2) / powi(brouwer0.a, 2)) * f220 * g200 * q22;
+    let delta3 = (9. * powi(brouwer0.n, 2) / powi(brouwer0.a, 3)) * f330 * g300 * q33;
 
     // Calculate the initial value for the auxilary variable lam0
     let theta_g = calc_theta_g(jd0, jdfrac0);
@@ -1445,13 +1450,13 @@ pub fn calc_theta_g(jd0: f64, jdfrac0: f64) -> f64 {
     let tut1 = (jd0 + jdfrac0 - 2451545.0) / 36525.0; // [centuries]
 
     // Calculate the Greenwich sidereal time in seconds
-    let temp = -6.2e-6 * tut1.powi(3)
-        + 0.093104 * tut1.powi(2)
+    let temp = -6.2e-6 * powi(tut1, 3)
+        + 0.093104 * powi(tut1, 2)
         + (876600.0 * 3600.0 + 8640184.812866) * tut1
         + 67310.54841; // [seconds]
 
     // Calculate the Greenwich sidereal time in radians
-    (deg2rad(temp / 240.0)).rem_euclid(2.0 * PI) // [radians] 360/86400 = 1/240 degrees per second
+    rem_euclid(deg2rad(temp / 240.0), 2.0 * PI) // [radians] 360/86400 = 1/240 degrees per second
 }
 
 /// Propagate an initialized [`Sgp4`] model to a UTC [`DateTime`].
@@ -1559,7 +1564,7 @@ pub fn sgp4_prop_datetime(sgp4: &Sgp4, datetime: &DateTime) -> Result<StateVecto
 /// - [History of Analytical Orbit Modeling in the U.S. Space Surveillance System by Hoots et al](https://arc.aiaa.org/doi/abs/10.2514/1.9161?journalCode=jgcd)
 pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> Result<StateVector, Sgp4Error> {
     // Reject non-finite or out-of-range times before they reach the resonance integrator loop
-    if !delta_t.is_finite() || delta_t.abs() > MAX_DELTA_T {
+    if !delta_t.is_finite() || abs(delta_t) > MAX_DELTA_T {
         return Err(Sgp4Error::InvalidDeltaT);
     }
 
@@ -1583,14 +1588,14 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> Result<StateVector, Sgp4Err
         delta_omega = 0.;
         delta_m = 0.;
     } else {
-        delta_omega = sgp4.gp.bstar * sgp4.atm_params.c3 * sgp4.brouwer0.omega.cos() * delta_t;
+        delta_omega = sgp4.gp.bstar * sgp4.atm_params.c3 * cos(sgp4.brouwer0.omega) * delta_t;
         delta_m = (-2. / 3.)
-            * (sgp4.atm_params.q0 - sgp4.atm_params.s).powi(4)
+            * powi(sgp4.atm_params.q0 - sgp4.atm_params.s, 4)
             * sgp4.gp.bstar
-            * sgp4.atm_params.zeta.powi(4)
+            * powi(sgp4.atm_params.zeta, 4)
             * (1. / (sgp4.brouwer0.e * sgp4.atm_params.eta))
-            * ((1. + sgp4.atm_params.eta * m_df.cos()).powi(3)
-                - (1. + sgp4.atm_params.eta * sgp4.brouwer0.m.cos()).powi(3));
+            * (powi(1. + sgp4.atm_params.eta * cos(m_df), 3)
+                - powi(1. + sgp4.atm_params.eta * cos(sgp4.brouwer0.m), 3));
     }
 
     m = m_df + delta_omega + delta_m;
@@ -1598,9 +1603,9 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> Result<StateVector, Sgp4Err
     raan = raan_df
         - (21. / 2.)
             * (sgp4.brouwer0.n * sgp4.wgs.k2 * sgp4.brouwer0.theta
-                / (sgp4.brouwer0.a.powi(2) * sgp4.brouwer0.beta.powi(2)))
+                / (powi(sgp4.brouwer0.a, 2) * powi(sgp4.brouwer0.beta, 2)))
             * sgp4.atm_params.c1
-            * delta_t.powi(2);
+            * powi(delta_t, 2);
 
     // Account for Lunar and Solar third body effects
     if sgp4.deep_space {
@@ -1621,7 +1626,7 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> Result<StateVector, Sgp4Err
         let mut lami_ddot: f64;
         let mut ni_ddot: f64;
         let step = if delta_t >= 0.0 { 720.0 } else { -720.0 };
-        let em_steps = (delta_t / step).floor() as i32;
+        let em_steps = floor(delta_t / step) as i32;
         let t_em = delta_t - em_steps as f64 * step;
 
         (lami_dot, ni_dot, lami_ddot, ni_ddot) = half_day_euler_maclaurin_step(
@@ -1642,11 +1647,13 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> Result<StateVector, Sgp4Err
                 half_day_euler_maclaurin_step(lami, ni, omegai, &sgp4.half_day_resonance_params);
         }
 
-        lami = lami + (lami_dot * t_em) + (0.5 * lami_ddot * t_em.powi(2));
-        ni = ni + (ni_dot * t_em) + (0.5 * ni_ddot * t_em.powi(2));
+        lami = lami + (lami_dot * t_em) + (0.5 * lami_ddot * powi(t_em, 2));
+        ni = ni + (ni_dot * t_em) + (0.5 * ni_ddot * powi(t_em, 2));
 
-        let theta_t =
-            (sgp4.half_day_resonance_params.theta_g + RPTIM * delta_t).rem_euclid(2.0 * PI);
+        let theta_t = rem_euclid(
+            sgp4.half_day_resonance_params.theta_g + RPTIM * delta_t,
+            2.0 * PI,
+        );
         n = ni;
         m = lami - 2. * raan + 2. * theta_t;
     } else if sgp4.whole_day_resonance {
@@ -1657,7 +1664,7 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> Result<StateVector, Sgp4Err
         let mut lami_ddot: f64;
         let mut ni_ddot: f64;
         let step = if delta_t >= 0.0 { 720.0 } else { -720.0 };
-        let em_steps = (delta_t / step).floor() as i32;
+        let em_steps = floor(delta_t / step) as i32;
         let t_em = delta_t - em_steps as f64 * step;
 
         (lami_dot, ni_dot, lami_ddot, ni_ddot) =
@@ -1671,11 +1678,13 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> Result<StateVector, Sgp4Err
                 whole_day_euler_maclaurin_step(lami, ni, &sgp4.whole_day_resonance_params);
         }
 
-        lami = lami + (lami_dot * t_em) + (0.5 * lami_ddot * t_em.powi(2));
-        ni = ni + (ni_dot * t_em) + (0.5 * ni_ddot * t_em.powi(2));
+        lami = lami + (lami_dot * t_em) + (0.5 * lami_ddot * powi(t_em, 2));
+        ni = ni + (ni_dot * t_em) + (0.5 * ni_ddot * powi(t_em, 2));
 
-        let theta_t =
-            (sgp4.whole_day_resonance_params.theta_g + RPTIM * delta_t).rem_euclid(2.0 * PI);
+        let theta_t = rem_euclid(
+            sgp4.whole_day_resonance_params.theta_g + RPTIM * delta_t,
+            2.0 * PI,
+        );
         n = ni;
         m = lami - raan - omega + theta_t;
     }
@@ -1690,32 +1699,31 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> Result<StateVector, Sgp4Err
     let il_atm: f64 = if sgp4.deep_space || sgp4.atm_params.hp < 220. {
         e += -sgp4.gp.bstar * (sgp4.atm_params.c4 * delta_t);
         let a_1 = 1. - sgp4.atm_params.c1 * delta_t; // Drop quadratic term, different from Hoots et al 2004
-        a = (sgp4.wgs.ke / n).powf(2. / 3.) * a_1.powi(2);
-        n = sgp4.wgs.ke / a.powf(1.5);
-        let il_1 = 3. / 2. * sgp4.atm_params.c1 * delta_t.powi(2);
+        a = powf(sgp4.wgs.ke / n, 2. / 3.) * powi(a_1, 2);
+        n = sgp4.wgs.ke / powf(a, 1.5);
+        let il_1 = 3. / 2. * sgp4.atm_params.c1 * powi(delta_t, 2);
         sgp4.brouwer0.n * il_1
     } else {
         e += -sgp4.gp.bstar
-            * (sgp4.atm_params.c4 * delta_t
-                + sgp4.atm_params.c5 * (m.sin() - sgp4.brouwer0.m.sin()));
-        let a_1 = 1. - sgp4.atm_params.c1 * delta_t - sgp4.atm_params.d2 * delta_t.powi(2);
-        let a_2 = -sgp4.atm_params.d3 * delta_t.powi(3) - sgp4.atm_params.d4 * delta_t.powi(4);
-        a = (sgp4.wgs.ke / n).powf(2. / 3.) * (a_1 + a_2).powi(2);
-        n = sgp4.wgs.ke / a.powf(1.5);
-        let il_1 = 3. / 2. * sgp4.atm_params.c1 * delta_t.powi(2);
-        let il_2 = (sgp4.atm_params.d2 + 2. * sgp4.atm_params.c1.powi(2)) * delta_t.powi(3);
+            * (sgp4.atm_params.c4 * delta_t + sgp4.atm_params.c5 * (sin(m) - sin(sgp4.brouwer0.m)));
+        let a_1 = 1. - sgp4.atm_params.c1 * delta_t - sgp4.atm_params.d2 * powi(delta_t, 2);
+        let a_2 = -sgp4.atm_params.d3 * powi(delta_t, 3) - sgp4.atm_params.d4 * powi(delta_t, 4);
+        a = powf(sgp4.wgs.ke / n, 2. / 3.) * powi(a_1 + a_2, 2);
+        n = sgp4.wgs.ke / powf(a, 1.5);
+        let il_1 = 3. / 2. * sgp4.atm_params.c1 * powi(delta_t, 2);
+        let il_2 = (sgp4.atm_params.d2 + 2. * powi(sgp4.atm_params.c1, 2)) * powi(delta_t, 3);
         let il_3 = 1. / 4.
             * (3. * sgp4.atm_params.d3
                 + 12. * sgp4.atm_params.c1 * sgp4.atm_params.d2
-                + 10. * sgp4.atm_params.c1.powi(3))
-            * delta_t.powi(4);
+                + 10. * powi(sgp4.atm_params.c1, 3))
+            * powi(delta_t, 4);
         let il_4 = 1. / 5.
             * (3. * sgp4.atm_params.d4
                 + 12. * sgp4.atm_params.c1 * sgp4.atm_params.d3
-                + 6. * sgp4.atm_params.d2.powi(2)
-                + 30. * sgp4.atm_params.c1.powi(2) * sgp4.atm_params.d2
-                + 15. * sgp4.atm_params.c1.powi(4))
-            * delta_t.powi(5);
+                + 6. * powi(sgp4.atm_params.d2, 2)
+                + 30. * powi(sgp4.atm_params.c1, 2) * sgp4.atm_params.d2
+                + 15. * powi(sgp4.atm_params.c1, 4))
+            * powi(delta_t, 5);
         sgp4.brouwer0.n * (il_1 + il_2 + il_3 + il_4)
     };
 
@@ -1741,12 +1749,12 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> Result<StateVector, Sgp4Err
     if sgp4.deep_space {
         let m_m = sgp4.lunar_params.m + sgp4.lunar_params.n * delta_t;
         let m_s = sgp4.solar_params.m + sgp4.solar_params.n * delta_t;
-        let f_m = m_m + 2. * sgp4.lunar_params.e * m_m.sin();
-        let f_s = m_s + 2. * sgp4.solar_params.e * m_s.sin();
-        let f2_m = 0.5 * f_m.sin().powi(2) - 0.25;
-        let f2_s = 0.5 * f_s.sin().powi(2) - 0.25;
-        let f3_m = -0.5 * f_m.sin() * f_m.cos();
-        let f3_s = -0.5 * f_s.sin() * f_s.cos();
+        let f_m = m_m + 2. * sgp4.lunar_params.e * sin(m_m);
+        let f_s = m_s + 2. * sgp4.solar_params.e * sin(m_s);
+        let f2_m = 0.5 * powi(sin(f_m), 2) - 0.25;
+        let f2_s = 0.5 * powi(sin(f_s), 2) - 0.25;
+        let f3_m = -0.5 * sin(f_m) * cos(f_m);
+        let f3_s = -0.5 * sin(f_s) * cos(f_s);
         let delta_e_m = -(30. * sgp4.brouwer0.beta * sgp4.lunar_params.c * sgp4.brouwer0.e
             / sgp4.brouwer0.n)
             * (f2_m
@@ -1771,24 +1779,24 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> Result<StateVector, Sgp4Err
                 + f3_s * (sgp4.solar_params.z13 - sgp4.solar_params.z11));
         let delta_m_m = -(2. * sgp4.lunar_params.c / sgp4.brouwer0.n)
             * (f2_m * sgp4.lunar_params.z2 + f3_m * (sgp4.lunar_params.z3 - sgp4.lunar_params.z1)
-                - 3. * sgp4.lunar_params.e * f_m.sin() * (7. + 3. * sgp4.brouwer0.e.powi(2)));
+                - 3. * sgp4.lunar_params.e * sin(f_m) * (7. + 3. * powi(sgp4.brouwer0.e, 2)));
         let delta_m_s = -(2. * sgp4.solar_params.c / sgp4.brouwer0.n)
             * (f2_s * sgp4.solar_params.z2 + f3_s * (sgp4.solar_params.z3 - sgp4.solar_params.z1)
-                - 3. * sgp4.solar_params.e * f_s.sin() * (7. + 3. * sgp4.brouwer0.e.powi(2)));
+                - 3. * sgp4.solar_params.e * sin(f_s) * (7. + 3. * powi(sgp4.brouwer0.e, 2)));
         let delta_raan_m = (sgp4.lunar_params.c / sgp4.brouwer0.n / sgp4.brouwer0.beta)
             * (f2_m * sgp4.lunar_params.z22
-                + f3_m * (sgp4.lunar_params.z23 - sgp4.lunar_params.z21)); // / sgp4.lunar_params.i.sin();
+                + f3_m * (sgp4.lunar_params.z23 - sgp4.lunar_params.z21)); // / sin(sgp4.lunar_params.i);
         let delta_raan_s = (sgp4.solar_params.c / sgp4.brouwer0.n / sgp4.brouwer0.beta)
             * (f2_s * sgp4.solar_params.z22
-                + f3_s * (sgp4.solar_params.z23 - sgp4.solar_params.z21)); // / sgp4.solar_params.i.sin();
+                + f3_s * (sgp4.solar_params.z23 - sgp4.solar_params.z21)); // / sin(sgp4.solar_params.i);
         let delta_omega_m = (2. * sgp4.brouwer0.beta * sgp4.lunar_params.c / sgp4.brouwer0.n)
             * (f2_m * sgp4.lunar_params.z32
                 + f3_m * (sgp4.lunar_params.z33 - sgp4.lunar_params.z31)
-                - 9. * sgp4.lunar_params.e * f_m.sin()); // - delta_raan_m * sgp4.lunar_params.i.cos();
+                - 9. * sgp4.lunar_params.e * sin(f_m)); // - delta_raan_m * cos(sgp4.lunar_params.i);
         let delta_omega_s = (2. * sgp4.brouwer0.beta * sgp4.solar_params.c / sgp4.brouwer0.n)
             * (f2_s * sgp4.solar_params.z32
                 + f3_s * (sgp4.solar_params.z33 - sgp4.solar_params.z31)
-                - 9. * sgp4.solar_params.e * f_s.sin()); // - delta_raan_s * sgp4.solar_params.i.cos();
+                - 9. * sgp4.solar_params.e * sin(f_s)); // - delta_raan_s * cos(sgp4.solar_params.i);
         let delta_e_ls = delta_e_m + delta_e_s;
         let delta_i_ls = delta_i_m + delta_i_s;
         let delta_m_ls = delta_m_m + delta_m_s;
@@ -1805,26 +1813,25 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> Result<StateVector, Sgp4Err
         if i >= 0.2 {
             // Notation is confusing in paper, delta_omega_ls stores more than just delta_omega
             // Same for delta_raan_ls, stores more than just delta_raan
-            raan += delta_raan_ls / i.sin();
-            omega += delta_omega_ls - delta_raan_ls * i.cos() / i.sin();
+            raan += delta_raan_ls / sin(i);
+            omega += delta_omega_ls - delta_raan_ls * cos(i) / sin(i);
             m += delta_m_ls;
         } else {
             // Lyddane modification for inclinations below 0.2 rad (legacy)
-            let alpha = i.sin() * raan.sin()
-                + raan.cos() * delta_raan_ls
-                + i.cos() * raan.sin() * delta_i_ls;
-            let beta = i.sin() * raan.cos() - raan.sin() * delta_raan_ls
-                + i.cos() * raan.cos() * delta_i_ls;
+            let alpha =
+                sin(i) * sin(raan) + cos(raan) * delta_raan_ls + cos(i) * sin(raan) * delta_i_ls;
+            let beta =
+                sin(i) * cos(raan) - sin(raan) * delta_raan_ls + cos(i) * cos(raan) * delta_i_ls;
             let raan_old = raan;
 
             // Use Vallado's modification which is more numerically stable when i ~ 0
             let m_omega_raan =
-                m + omega + delta_m_ls + delta_omega_ls + (i.cos() - delta_i_ls * i.sin()) * raan;
+                m + omega + delta_m_ls + delta_omega_ls + (cos(i) - delta_i_ls * sin(i)) * raan;
 
             // Calculate RAAN
-            raan = alpha.atan2(beta);
+            raan = atan2(alpha, beta);
             // Maintain RAAN continuity across atan2 branch cuts
-            if (raan_old - raan).abs() > PI {
+            if abs(raan_old - raan) > PI {
                 if raan < raan_old {
                     raan += 2.0 * PI;
                 } else {
@@ -1834,7 +1841,7 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> Result<StateVector, Sgp4Err
 
             // Calculate omega
             m += delta_m_ls;
-            omega = m_omega_raan - m - i.cos() * raan;
+            omega = m_omega_raan - m - cos(i) * raan;
         }
     }
 
@@ -1848,35 +1855,35 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> Result<StateVector, Sgp4Err
     let il = m + omega + raan;
 
     // Account for long-period periodic effects of Earth's gravity
-    let beta_update = (1. - e.powi(2)).sqrt();
+    let beta_update = sqrt(1. - powi(e, 2));
     let a30 = -sgp4.wgs.j3; // [Earth Radii^3]
-    let axn = e * omega.cos();
+    let axn = e * cos(omega);
     // Vallado floor on 1 + cos(i) so retrograde equatorial orbits (i = 180 deg) do not divide by zero
-    let mut one_plus_cos_i = 1. + i.cos();
-    if one_plus_cos_i.abs() < 1.5e-12 {
+    let mut one_plus_cos_i = 1. + cos(i);
+    if abs(one_plus_cos_i) < 1.5e-12 {
         one_plus_cos_i = 1.5e-12;
     }
-    let ill = a30 * i.sin() / (8. * sgp4.wgs.k2 * a * beta_update.powi(2))
+    let ill = a30 * sin(i) / (8. * sgp4.wgs.k2 * a * powi(beta_update, 2))
         * e
-        * omega.cos()
-        * (3. + 5. * i.cos())
+        * cos(omega)
+        * (3. + 5. * cos(i))
         / one_plus_cos_i;
-    let aynl = a30 * i.sin() / (4. * sgp4.wgs.k2 * a * beta_update.powi(2));
+    let aynl = a30 * sin(i) / (4. * sgp4.wgs.k2 * a * powi(beta_update, 2));
     let ilt = il + ill;
-    let ayn = e * omega.sin() + aynl;
+    let ayn = e * sin(omega) + aynl;
 
     // Account for short-period periodic effects of Earth's gravity (solve Kepler's equation)
-    let u = (ilt - raan).rem_euclid(2.0 * PI);
+    let u = rem_euclid(ilt - raan, 2.0 * PI);
     let mut e_omega = u;
     let mut delta_e_omega: f64;
 
     // Newton-Raphson iteration to solve Kepler's equation (10 iterations max per Vallado)
     for _ in 0..10 {
-        delta_e_omega = (u - ayn * e_omega.cos() + axn * e_omega.sin() - e_omega)
-            / (1. - ayn * e_omega.sin() - axn * e_omega.cos());
+        delta_e_omega = (u - ayn * cos(e_omega) + axn * sin(e_omega) - e_omega)
+            / (1. - ayn * sin(e_omega) - axn * cos(e_omega));
 
         // Protect against oversized steps
-        if delta_e_omega.abs() >= 0.95 {
+        if abs(delta_e_omega) >= 0.95 {
             if delta_e_omega > 0.0 {
                 delta_e_omega = 0.95;
             } else {
@@ -1887,38 +1894,38 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> Result<StateVector, Sgp4Err
         e_omega += delta_e_omega;
 
         // Verify convergence
-        if delta_e_omega.abs() < 1e-12 {
+        if abs(delta_e_omega) < 1e-12 {
             break;
         }
     }
 
     // Return position and velocity vectors in the TEME frame
-    e = (axn.powi(2) + ayn.powi(2)).sqrt();
-    let pl = a * (1. - e.powi(2));
+    e = sqrt(powi(axn, 2) + powi(ayn, 2));
+    let pl = a * (1. - powi(e, 2));
     if pl < 0.0 {
         return Err(Sgp4Error::InvalidSemilatusRectum);
     }
-    let cos_ecc_anomaly = (axn * e_omega.cos() + ayn * e_omega.sin()) / e;
-    let sin_ecc_anomaly = (axn * e_omega.sin() - ayn * e_omega.cos()) / e;
+    let cos_ecc_anomaly = (axn * cos(e_omega) + ayn * sin(e_omega)) / e;
+    let sin_ecc_anomaly = (axn * sin(e_omega) - ayn * cos(e_omega)) / e;
     let r = a * (1. - e * cos_ecc_anomaly);
-    let r_dot = sgp4.wgs.ke * a.sqrt() * e * sin_ecc_anomaly / r;
-    let r_f_dot = sgp4.wgs.ke * pl.sqrt() / r;
-    let cos_u = a / r
-        * (e_omega.cos() - axn + ayn * (e * sin_ecc_anomaly) / (1. + (1. - e.powi(2)).sqrt()));
-    let sin_u = a / r
-        * (e_omega.sin() - ayn - axn * (e * sin_ecc_anomaly) / (1. + (1. - e.powi(2)).sqrt()));
-    let u = sin_u.atan2(cos_u);
-    let delta_r = sgp4.wgs.k2 / (2. * pl) * (1. - i.cos().powi(2)) * (2. * u).cos();
-    let delta_u = -sgp4.wgs.k2 / (4. * pl.powi(2)) * (7. * i.cos().powi(2) - 1.) * (2. * u).sin();
-    let delta_raan = 3. * sgp4.wgs.k2 * i.cos() / (2. * pl.powi(2)) * (2. * u).sin();
-    let delta_i = 3. * sgp4.wgs.k2 * i.cos() / (2. * pl.powi(2)) * i.sin() * (2. * u).cos();
-    let delta_r_dot = -sgp4.wgs.k2 * n / pl * (1. - i.cos().powi(2)) * (2. * u).sin();
+    let r_dot = sgp4.wgs.ke * sqrt(a) * e * sin_ecc_anomaly / r;
+    let r_f_dot = sgp4.wgs.ke * sqrt(pl) / r;
+    let cos_u =
+        a / r * (cos(e_omega) - axn + ayn * (e * sin_ecc_anomaly) / (1. + sqrt(1. - powi(e, 2))));
+    let sin_u =
+        a / r * (sin(e_omega) - ayn - axn * (e * sin_ecc_anomaly) / (1. + sqrt(1. - powi(e, 2))));
+    let u = atan2(sin_u, cos_u);
+    let delta_r = sgp4.wgs.k2 / (2. * pl) * (1. - powi(cos(i), 2)) * cos(2. * u);
+    let delta_u = -sgp4.wgs.k2 / (4. * powi(pl, 2)) * (7. * powi(cos(i), 2) - 1.) * sin(2. * u);
+    let delta_raan = 3. * sgp4.wgs.k2 * cos(i) / (2. * powi(pl, 2)) * sin(2. * u);
+    let delta_i = 3. * sgp4.wgs.k2 * cos(i) / (2. * powi(pl, 2)) * sin(i) * cos(2. * u);
+    let delta_r_dot = -sgp4.wgs.k2 * n / pl * (1. - powi(cos(i), 2)) * sin(2. * u);
     let delta_r_f_dot = sgp4.wgs.k2 * n / pl
-        * ((1. - i.cos().powi(2)) * (2. * u).cos() - 3. / 2. * (1. - 3. * i.cos().powi(2)));
+        * ((1. - powi(cos(i), 2)) * cos(2. * u) - 3. / 2. * (1. - 3. * powi(cos(i), 2)));
     let rk = r
         * (1.
-            - 3. / 2. * sgp4.wgs.k2 * (1. - e.powi(2)).sqrt() / pl.powi(2)
-                * (3. * i.cos().powi(2) - 1.))
+            - 3. / 2. * sgp4.wgs.k2 * sqrt(1. - powi(e, 2)) / powi(pl, 2)
+                * (3. * powi(cos(i), 2) - 1.))
         + delta_r;
     if rk < 1.0 {
         return Err(Sgp4Error::SatelliteDecayed);
@@ -1929,21 +1936,21 @@ pub fn sgp4_prop_delta(sgp4: &Sgp4, delta_t: f64) -> Result<StateVector, Sgp4Err
     let r_dot_k = r_dot + delta_r_dot;
     let r_f_dot_k = r_f_dot + delta_r_f_dot;
 
-    let mx = -raan_k.sin() * i_k.cos();
-    let my = raan_k.cos() * i_k.cos();
-    let mz = i_k.sin();
+    let mx = -sin(raan_k) * cos(i_k);
+    let my = cos(raan_k) * cos(i_k);
+    let mz = sin(i_k);
 
-    let nx = raan_k.cos();
-    let ny = raan_k.sin();
+    let nx = cos(raan_k);
+    let ny = sin(raan_k);
     let nz = 0.;
 
-    let ux = mx * uk.sin() + nx * uk.cos();
-    let uy = my * uk.sin() + ny * uk.cos();
-    let uz = mz * uk.sin() + nz * uk.cos();
+    let ux = mx * sin(uk) + nx * cos(uk);
+    let uy = my * sin(uk) + ny * cos(uk);
+    let uz = mz * sin(uk) + nz * cos(uk);
 
-    let vx = mx * uk.cos() - nx * uk.sin();
-    let vy = my * uk.cos() - ny * uk.sin();
-    let vz = mz * uk.cos() - nz * uk.sin();
+    let vx = mx * cos(uk) - nx * sin(uk);
+    let vy = my * cos(uk) - ny * sin(uk);
+    let vz = mz * cos(uk) - nz * sin(uk);
 
     let rx = rk * ux * sgp4.wgs.r_earth_eq;
     let ry = rk * uy * sgp4.wgs.r_earth_eq;
@@ -2005,16 +2012,16 @@ fn half_day_euler_maclaurin_step(
     let lami_dot = ni + half_day_resonance_params.lam0_dot;
 
     // Calculate the rate of change of the mean motion
-    let ni_dot_2201 = half_day_resonance_params.d2201 * (2. * omegai + lami - g22).sin();
-    let ni_dot_2211 = half_day_resonance_params.d2211 * (lami - g22).sin();
-    let ni_dot_3210 = half_day_resonance_params.d3210 * (omegai + lami - g32).sin();
-    let ni_dot_3222 = half_day_resonance_params.d3222 * (-omegai + lami - g32).sin();
-    let ni_dot_5220 = half_day_resonance_params.d5220 * (omegai + lami - g52).sin();
-    let ni_dot_5232 = half_day_resonance_params.d5232 * (-omegai + lami - g52).sin();
-    let ni_dot_4422 = half_day_resonance_params.d4422 * (2. * lami - g44).sin();
-    let ni_dot_5421 = half_day_resonance_params.d5421 * (omegai + 2. * lami - g54).sin();
-    let ni_dot_5433 = half_day_resonance_params.d5433 * (-omegai + 2. * lami - g54).sin();
-    let ni_dot_4410 = half_day_resonance_params.d4410 * (2. * omegai + 2. * lami - g44).sin();
+    let ni_dot_2201 = half_day_resonance_params.d2201 * sin(2. * omegai + lami - g22);
+    let ni_dot_2211 = half_day_resonance_params.d2211 * sin(lami - g22);
+    let ni_dot_3210 = half_day_resonance_params.d3210 * sin(omegai + lami - g32);
+    let ni_dot_3222 = half_day_resonance_params.d3222 * sin(-omegai + lami - g32);
+    let ni_dot_5220 = half_day_resonance_params.d5220 * sin(omegai + lami - g52);
+    let ni_dot_5232 = half_day_resonance_params.d5232 * sin(-omegai + lami - g52);
+    let ni_dot_4422 = half_day_resonance_params.d4422 * sin(2. * lami - g44);
+    let ni_dot_5421 = half_day_resonance_params.d5421 * sin(omegai + 2. * lami - g54);
+    let ni_dot_5433 = half_day_resonance_params.d5433 * sin(-omegai + 2. * lami - g54);
+    let ni_dot_4410 = half_day_resonance_params.d4410 * sin(2. * omegai + 2. * lami - g44);
     let ni_dot = ni_dot_2201
         + ni_dot_2211
         + ni_dot_3210
@@ -2030,16 +2037,16 @@ fn half_day_euler_maclaurin_step(
     let lami_ddot = ni_dot;
 
     // Calculate the 2nd derivative of the mean motion
-    let ni_ddot_2201 = 1. * half_day_resonance_params.d2201 * (2. * omegai + lami - g22).cos();
-    let ni_ddot_2211 = 1. * half_day_resonance_params.d2211 * (lami - g22).cos();
-    let ni_ddot_3210 = 1. * half_day_resonance_params.d3210 * (omegai + lami - g32).cos();
-    let ni_ddot_3222 = 1. * half_day_resonance_params.d3222 * (-omegai + lami - g32).cos();
-    let ni_ddot_5220 = 1. * half_day_resonance_params.d5220 * (omegai + lami - g52).cos();
-    let ni_ddot_5232 = 1. * half_day_resonance_params.d5232 * (-omegai + lami - g52).cos();
-    let ni_ddot_4422 = 2. * half_day_resonance_params.d4422 * (2. * lami - g44).cos();
-    let ni_ddot_5421 = 2. * half_day_resonance_params.d5421 * (omegai + 2. * lami - g54).cos();
-    let ni_ddot_5433 = 2. * half_day_resonance_params.d5433 * (-omegai + 2. * lami - g54).cos();
-    let ni_ddot_4410 = 2. * half_day_resonance_params.d4410 * (2. * omegai + 2. * lami - g44).cos();
+    let ni_ddot_2201 = 1. * half_day_resonance_params.d2201 * cos(2. * omegai + lami - g22);
+    let ni_ddot_2211 = 1. * half_day_resonance_params.d2211 * cos(lami - g22);
+    let ni_ddot_3210 = 1. * half_day_resonance_params.d3210 * cos(omegai + lami - g32);
+    let ni_ddot_3222 = 1. * half_day_resonance_params.d3222 * cos(-omegai + lami - g32);
+    let ni_ddot_5220 = 1. * half_day_resonance_params.d5220 * cos(omegai + lami - g52);
+    let ni_ddot_5232 = 1. * half_day_resonance_params.d5232 * cos(-omegai + lami - g52);
+    let ni_ddot_4422 = 2. * half_day_resonance_params.d4422 * cos(2. * lami - g44);
+    let ni_ddot_5421 = 2. * half_day_resonance_params.d5421 * cos(omegai + 2. * lami - g54);
+    let ni_ddot_5433 = 2. * half_day_resonance_params.d5433 * cos(-omegai + 2. * lami - g54);
+    let ni_ddot_4410 = 2. * half_day_resonance_params.d4410 * cos(2. * omegai + 2. * lami - g44);
     let ni_ddot = lami_dot
         * (ni_ddot_2201
             + ni_ddot_2211
@@ -2083,12 +2090,11 @@ fn whole_day_euler_maclaurin_step(
     let lami_dot = ni + whole_day_resonance_params.lam0_dot;
 
     // Calculate the rate of change of the mean motion
-    let ni_dot_1 =
-        whole_day_resonance_params.delta1 * (lami - whole_day_resonance_params.lam31).sin();
+    let ni_dot_1 = whole_day_resonance_params.delta1 * sin(lami - whole_day_resonance_params.lam31);
     let ni_dot_2 =
-        whole_day_resonance_params.delta2 * (2. * (lami - whole_day_resonance_params.lam22)).sin();
+        whole_day_resonance_params.delta2 * sin(2. * (lami - whole_day_resonance_params.lam22));
     let ni_dot_3 =
-        whole_day_resonance_params.delta3 * (3. * (lami - whole_day_resonance_params.lam33)).sin();
+        whole_day_resonance_params.delta3 * sin(3. * (lami - whole_day_resonance_params.lam33));
     let ni_dot = ni_dot_1 + ni_dot_2 + ni_dot_3;
 
     // Calculate the 2nd derivative of the auxilary variable
@@ -2096,13 +2102,13 @@ fn whole_day_euler_maclaurin_step(
 
     // Calculate the 2nd derivative of the mean motion
     let ni_ddot_1 =
-        whole_day_resonance_params.delta1 * (lami - whole_day_resonance_params.lam31).cos();
+        whole_day_resonance_params.delta1 * cos(lami - whole_day_resonance_params.lam31);
     let ni_ddot_2 = 2.
         * whole_day_resonance_params.delta2
-        * (2. * (lami - whole_day_resonance_params.lam22)).cos();
+        * cos(2. * (lami - whole_day_resonance_params.lam22));
     let ni_ddot_3 = 3.
         * whole_day_resonance_params.delta3
-        * (3. * (lami - whole_day_resonance_params.lam33)).cos();
+        * cos(3. * (lami - whole_day_resonance_params.lam33));
     let ni_ddot = lami_dot * (ni_ddot_1 + ni_ddot_2 + ni_ddot_3);
 
     (lami_dot, ni_dot, lami_ddot, ni_ddot)
@@ -2118,6 +2124,8 @@ mod tests {
     use crate::time::Timezone;
     use serde::Deserialize;
     use std::collections::HashMap;
+    use std::string::String;
+    use std::vec::Vec;
     use toml::from_str;
 
     // -------------------------------------------------------
