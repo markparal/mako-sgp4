@@ -499,9 +499,9 @@ pub struct WholeDayResonanceParams {
 /// use mako_sgp4::sgp4::Sgp4Error;
 /// use mako_sgp4::time::DateError;
 ///
-/// // A non-UTC datetime is a recoverable SGP4 error
-/// let err = Sgp4Error::InvalidDateTime(DateError::DateNotUTC);
-/// assert_eq!(err, Sgp4Error::InvalidDateTime(DateError::DateNotUTC));
+/// // A pre-Gregorian datetime is a recoverable SGP4 error
+/// let err = Sgp4Error::InvalidDateTime(DateError::DateTooEarly);
+/// assert_eq!(err, Sgp4Error::InvalidDateTime(DateError::DateTooEarly));
 /// ```
 ///
 /// # References
@@ -2411,7 +2411,7 @@ mod tests {
         }
     }
 
-    /// Reject a non-UTC or pre-Gregorian propagation time
+    /// Reject a pre-Gregorian epoch or propagation time
     ///
     /// Checks both initialization and `sgp4_prop_datetime`.
     ///
@@ -2419,9 +2419,9 @@ mod tests {
     /// * If either path accepts an invalid datetime
     #[test]
     fn test_invalid_date_time() {
-        let mut gp = GenPerturbElementSet {
+        let gp = GenPerturbElementSet {
             epoch_datetime: DateTime {
-                timezone: Timezone::UT1,
+                year: 1500,
                 ..utc_j2000()
             },
             mean_motion: 15.0,
@@ -2429,27 +2429,11 @@ mod tests {
         };
         assert!(matches!(
             init_sgp4(&gp, None),
-            Err(Sgp4Error::InvalidDateTime(DateError::DateNotUTC))
-        ));
-
-        gp.epoch_datetime = DateTime {
-            year: 1500,
-            ..utc_j2000()
-        };
-        assert!(matches!(
-            init_sgp4(&gp, None),
             Err(Sgp4Error::InvalidDateTime(DateError::DateTooEarly))
         ));
 
         let sgp4 = iss_sgp4();
-        let mut datetime = sgp4.gp.epoch_datetime;
-        datetime.timezone = Timezone::UT1;
-        assert!(matches!(
-            sgp4_prop_datetime(&sgp4, &datetime),
-            Err(Sgp4Error::InvalidDateTime(DateError::DateNotUTC))
-        ));
-
-        datetime = DateTime {
+        let datetime = DateTime {
             year: 1500,
             ..utc_j2000()
         };

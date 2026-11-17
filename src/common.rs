@@ -107,23 +107,18 @@ pub struct StateVector {
 /// ```rust
 /// use mako_sgp4::common::CoordinateFrame;
 ///
-/// // SGP4 state vectors are TEME; J2000 is the enum default
-/// let frame_teme = CoordinateFrame::TEME;
-/// let frame_j2000 = CoordinateFrame::J2000;
+/// // SGP4 state vectors are TEME, which is also the enum default
+/// let frame = CoordinateFrame::TEME;
 ///
-/// assert_eq!(frame_j2000, CoordinateFrame::default());
-/// assert_ne!(frame_teme, frame_j2000);
+/// assert_eq!(frame, CoordinateFrame::default());
 /// ```
 ///
 /// # References
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CoordinateFrame {
-    /// J2000, an Earth-centered inertial (ECI) coordinate frame
-    #[default]
-    J2000,
-
     /// True Equator Mean Equinox (TEME), an Earth-centered inertial (ECI) coordinate frame
+    #[default]
     TEME,
 }
 

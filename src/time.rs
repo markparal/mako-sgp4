@@ -77,20 +77,20 @@ pub struct DateTime {
 /// ```rust
 /// use mako_sgp4::time::{DateError, DateTime, Timezone, utc2jday};
 ///
-/// // Julian conversion requires UTC
+/// // Julian conversion requires a Gregorian date
 /// let datetime = DateTime {
-///     year: 2000,
+///     year: 1500,
 ///     month: 1,
 ///     day: 1,
 ///     hour: 12,
 ///     minute: 0,
 ///     second: 0.0,
-///     timezone: Timezone::UT1,
+///     timezone: Timezone::UTC,
 /// };
 ///
-/// // Assert the non-UTC error
+/// // Assert the pre-Gregorian error
 /// let err = utc2jday(&datetime).unwrap_err();
-/// assert_eq!(err, DateError::DateNotUTC);
+/// assert_eq!(err, DateError::DateTooEarly);
 /// ```
 ///
 /// # References
@@ -104,6 +104,9 @@ pub enum DateError {
     InvalidDayOfYear,
 
     /// The datetime is not in UTC
+    ///
+    /// Not returned while UTC is the only [`Timezone`]. Kept for time scales
+    /// that may be added later.
     DateNotUTC,
 
     /// The month is outside 1-12 or the day is outside the days in that month
@@ -123,10 +126,8 @@ pub enum DateError {
 ///
 /// // UTC is the default and the time scale used by GP / SGP4
 /// let tz_utc = Timezone::UTC;
-/// let tz_ut1 = Timezone::UT1;
 ///
 /// assert_eq!(tz_utc, Timezone::default());
-/// assert_ne!(tz_utc, tz_ut1);
 /// ```
 ///
 /// # References
@@ -139,13 +140,6 @@ pub enum Timezone {
     /// It is within about 1 second of mean solar time at 0 deg longitude.
     #[default]
     UTC,
-
-    /// Universal Time 1 (UT1)
-    ///
-    /// UT1 is a form of Universal Time that is directly related to the rotation of the Earth.
-    /// It is based on the Earth's rotation and is used in astronomical calculations.
-    /// UT1 differs from UTC by up to 0.9 seconds due to variations in Earth's rotation.
-    UT1,
 }
 
 // ------
@@ -828,7 +822,7 @@ mod tests {
     /// Convert known UTC datetimes to Julian dates
     ///
     /// Covers a 20th century date, a 21st century date, the year 2000, a date
-    /// before Gregorian adoption, and a non-UTC timezone.
+    /// and a date before Gregorian adoption.
     ///
     /// # Panics
     /// * If a conversion misses the expected Julian date or the expected error
@@ -914,27 +908,12 @@ mod tests {
             "Should return error for date before Oct 10, 1582"
         );
         assert_eq!(result.unwrap_err(), DateError::DateTooEarly);
-
-        // Test non-UTC datetime
-        let datetime5 = DateTime {
-            year: 1990,
-            month: 10,
-            day: 9,
-            hour: 12,
-            minute: 0,
-            second: 0.0,
-            timezone: Timezone::UT1,
-        };
-
-        let result = utc2jday(&datetime5);
-        assert!(result.is_err(), "Should return error for non-UTC date");
-        assert_eq!(result.unwrap_err(), DateError::DateNotUTC);
     }
 
     /// Convert known UTC datetimes to Modified Julian dates
     ///
     /// Covers a 20th century date, a 21st century date, the year 2000, a date
-    /// before Gregorian adoption, and a non-UTC timezone.
+    /// and a date before Gregorian adoption.
     ///
     /// # Panics
     /// * If a conversion misses the expected Modified Julian date or the expected error
@@ -1019,21 +998,6 @@ mod tests {
             "Should return error for date before Oct 10, 1582"
         );
         assert_eq!(result.unwrap_err(), DateError::DateTooEarly);
-
-        // Test non-UTC datetime
-        let datetime5 = DateTime {
-            year: 1990,
-            month: 10,
-            day: 9,
-            hour: 12,
-            minute: 0,
-            second: 0.0,
-            timezone: Timezone::UT1,
-        };
-
-        let result = utc2mjday(&datetime5);
-        assert!(result.is_err(), "Should return error for non-UTC date");
-        assert_eq!(result.unwrap_err(), DateError::DateNotUTC);
     }
 
     /// Convert a year and day-of-year into a UTC datetime
