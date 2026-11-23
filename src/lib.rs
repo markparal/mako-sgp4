@@ -28,6 +28,10 @@ extern crate std;
 
 pub mod common;
 pub mod gp;
+// Not yet called outside its own tests; remove this allow once the GP fit
+// uses all of it (implementation step 6)
+#[cfg_attr(not(test), allow(dead_code))]
+mod linalg;
 mod math;
 pub mod sgp4;
 pub mod time;
