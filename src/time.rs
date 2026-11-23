@@ -169,6 +169,17 @@ impl core::error::Error for DateError {}
 // Constants
 // ---------
 
+/// Length of one TLE epoch tick \[microseconds\]
+///
+/// A TLE epoch has eight decimals of a day, so one tick is 1e-8 day, which is
+/// exactly 864 microseconds.
+const TLE_TICK_MICROS: i64 = 864;
+
+/// Number of TLE epoch ticks in a day
+///
+/// 86,400,000,000 microseconds divided by [`TLE_TICK_MICROS`].
+const TLE_TICKS_PER_DAY: i64 = 100_000_000;
+
 // ---------
 // Functions
 // ---------
@@ -309,6 +320,52 @@ pub(crate) fn round_to_microseconds(datetime: &DateTime) -> Option<(DateTime, i6
 
     rounded.second = (micros / 1_000_000) as f64;
     Some((rounded, micros % 1_000_000))
+}
+
+/// Round a datetime to the nearest TLE epoch tick
+///
+/// A TLE stores its epoch as a day of year with eight decimals, so its grid is
+/// 1e-8 day, exactly 864 microseconds. The seconds are first rounded to whole
+/// microseconds, then the time of day to the nearest tick, half a tick
+/// rounding up. A time that rounds up to midnight becomes 00:00:00 of the next
+/// day, carrying into the month and year as needed. A leap second is treated
+/// as part of the day it ends, so 23:59:60 rounds into the next day.
+///
+/// # Arguments
+/// * `datetime` - A datetime that passes [`validate_datetime`]
+///
+/// # Returns
+/// * `Some(DateTime)` - The datetime on the TLE grid, at most 432 microseconds away
+/// * `None` - If carrying would overflow the year
+pub(crate) fn round_to_tle_epoch(datetime: &DateTime) -> Option<DateTime> {
+    // Microseconds into the day, then the nearest tick of 864 microseconds
+    let micros_of_day = (datetime.hour as i64 * 3600 + datetime.minute as i64 * 60) * 1_000_000
+        + round(datetime.second * 1e6) as i64;
+    let ticks = (micros_of_day + TLE_TICK_MICROS / 2) / TLE_TICK_MICROS;
+
+    // A full day of ticks carries into the next day
+    let mut rounded = *datetime;
+    let ticks_in_day = if ticks >= TLE_TICKS_PER_DAY {
+        rounded.day += 1;
+        if rounded.day > days_in_month(rounded.year, rounded.month) {
+            rounded.day = 1;
+            rounded.month += 1;
+        }
+        if rounded.month == 13 {
+            rounded.month = 1;
+            rounded.year = rounded.year.checked_add(1)?;
+        }
+        ticks - TLE_TICKS_PER_DAY
+    } else {
+        ticks
+    };
+
+    // Split the rounded time of day back into hours, minutes and seconds
+    let micros = ticks_in_day * TLE_TICK_MICROS;
+    rounded.hour = (micros / 3_600_000_000) as i32;
+    rounded.minute = (micros % 3_600_000_000 / 60_000_000) as i32;
+    rounded.second = (micros % 60_000_000) as f64 / 1e6;
+    Some(rounded)
 }
 
 /// Convert a datetime in UTC to Julian date (JD) format.
@@ -703,6 +760,81 @@ mod tests {
 
         // Carrying past the last representable year is rejected
         assert!(round_to_microseconds(&dt(i32::MAX, 12, 31, 23, 59, 59.9999999)).is_none());
+    }
+
+    /// Round to the TLE epoch grid of 1e-8 day and carry a rounded-up day
+    ///
+    /// # Panics
+    /// * If a rounded field differs from the expected value, the result is
+    ///   off the grid, or it moves by more than half a tick
+    #[test]
+    fn test_round_to_tle_epoch() {
+        use crate::math::abs;
+        let dt = |year, month, day, hour, minute, second| DateTime {
+            year,
+            month,
+            day,
+            hour,
+            minute,
+            second,
+            timezone: Timezone::UTC,
+        };
+        let cases = [
+            // On the grid already: tick 50,000,000 is noon
+            (dt(2024, 3, 1, 12, 0, 0.0), (2024, 3, 1, 12, 0, 0.0)),
+            // 431 microseconds rounds down, 432 (half a tick) rounds up
+            (dt(2024, 3, 1, 12, 0, 0.000431), (2024, 3, 1, 12, 0, 0.0)),
+            (
+                dt(2024, 3, 1, 12, 0, 0.000432),
+                (2024, 3, 1, 12, 0, 0.000864),
+            ),
+            // Day, month, leap-day and year carries
+            (dt(2024, 3, 1, 23, 59, 59.9996), (2024, 3, 2, 0, 0, 0.0)),
+            (dt(2023, 2, 28, 23, 59, 59.9996), (2023, 3, 1, 0, 0, 0.0)),
+            (dt(2024, 2, 28, 23, 59, 59.9996), (2024, 2, 29, 0, 0, 0.0)),
+            (dt(2024, 12, 31, 23, 59, 59.9996), (2025, 1, 1, 0, 0, 0.0)),
+            // A leap second can't be written as a TLE epoch and rounds into the next day
+            (dt(2016, 12, 31, 23, 59, 60.5), (2017, 1, 1, 0, 0, 0.500256)),
+        ];
+        for (input, (year, month, day, hour, minute, second)) in cases {
+            let rounded = round_to_tle_epoch(&input).expect("year should not overflow");
+            assert_eq!(
+                (
+                    rounded.year,
+                    rounded.month,
+                    rounded.day,
+                    rounded.hour,
+                    rounded.minute
+                ),
+                (year, month, day, hour, minute),
+                "{input:?}"
+            );
+            assert!(
+                abs(rounded.second - second) < 1e-9,
+                "{input:?}: second {}",
+                rounded.second
+            );
+        }
+
+        // Arbitrary times land on the grid, within half a tick of the input
+        for k in 0..1000 {
+            // Seconds from 0.000123 to 59.64, all valid
+            let second = (k as f64) * 0.0597 + 0.000_123;
+            let input = dt(2025, 7, 4, 6, 30, second);
+            let rounded = round_to_tle_epoch(&input).expect("no overflow");
+            let (jd_in, frac_in) = utc2jday(&input).unwrap();
+            let (jd_out, frac_out) = utc2jday(&rounded).unwrap();
+            let shift = ((jd_out - jd_in) + (frac_out - frac_in)) * 86400.0;
+            assert!(abs(shift) <= 432.5e-6, "second {second}: moved {shift} s");
+            let ticks = frac_out * 1e8;
+            assert!(
+                abs(ticks - round(ticks)) < 1e-5,
+                "second {second}: {ticks} ticks"
+            );
+        }
+
+        // Carrying past the last representable year is rejected
+        assert!(round_to_tle_epoch(&dt(i32::MAX, 12, 31, 23, 59, 59.9999)).is_none());
     }
 
     /// Validate calendar and clock ranges
