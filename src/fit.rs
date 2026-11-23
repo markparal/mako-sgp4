@@ -30,7 +30,7 @@ use core::fmt;
 // ------------------
 use crate::common::{CoordinateFrame, Wgs};
 use crate::gp::GenPerturbElementSet;
-use crate::linalg::cholesky;
+use crate::linalg::{cholesky, solve_lower};
 use crate::math::{abs, atan2, cos, rem_euclid, sin, sqrt};
 use crate::sgp4::{Sgp4, Sgp4Error};
 use crate::time::{DateTime, Timezone, round_to_tle_epoch, utc2jday};
@@ -574,6 +574,24 @@ pub(crate) enum CheckedMeasurement {
     },
 }
 
+/// Noise matrix of one observation
+///
+/// Equation 3 of the fit plan: either the total noise covariance R_j or its
+/// lower-triangular Cholesky factor L_j, with R_j = L_j*L_j^T. The variant
+/// matches the observation's measurement: position then velocity for a full
+/// state, position alone for a position.
+// A state matrix is 288 bytes against 72 for a position; boxing it would
+// cost an allocation per observation for no real saving
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum NoiseMatrix {
+    /// Full state, 6 x 6 \[km and km/s, squared for R_j\]
+    State([[f64; 6]; 6]),
+
+    /// Position, 3 x 3 \[km, squared for R_j\]
+    Position([[f64; 3]; 3]),
+}
+
 // ------
 // Traits
 // ------
@@ -707,6 +725,19 @@ const SYMMETRY_TOLERANCE: f64 = 1e-12;
 /// identity must have a Cholesky factor, so a singular covariance and one
 /// with a roundoff-sized negative eigenvalue pass.
 const PSD_SHIFT: f64 = 1e-12;
+
+/// SGP4 model error \[km\]
+///
+/// The one-sigma position error every observation carries from SGP4 itself,
+/// added to its measurement noise. An internal constant with no user option;
+/// the velocity term is n0 times this.
+const MODEL_ERROR_SIGMA: f64 = 1.0;
+
+/// Seconds in a minute
+///
+/// Converts a mean motion in rad/min to the rad/s that scales a velocity
+/// sigma in km/s.
+const SECONDS_PER_MINUTE: f64 = 60.0;
 
 // ---------
 // Functions
@@ -1035,6 +1066,107 @@ pub(crate) fn checked_covariance<const N: usize>(cov: &[[f64; N]; N]) -> Option<
     // Positive semidefinite up to the shift
     cholesky(&scaled)?;
     Some(sym)
+}
+
+/// Total noise covariance of one observation
+///
+/// Equation 3 of the fit plan: R_j = R_sensor,j + sigma_model^2 * M_j, with
+/// M_j = diag(I3, n0^2 * I3) for a state and I3 for a position. The sensor
+/// term is the observation's measurement noise, zero without it. The
+/// velocity term n0 * sigma_model keeps position and velocity weights
+/// consistent in every orbit regime, because a position error sigma on an
+/// orbit goes with about n * sigma of velocity error.
+///
+/// # Arguments
+/// * `measurement` - The checked measurement, with its measurement noise
+/// * `n0` - The reference mean motion fixed for the fit \[rad/min\]
+///
+/// # Returns
+/// * `r` - The total noise covariance R_j
+pub(crate) fn total_covariance(measurement: &CheckedMeasurement, n0: f64) -> NoiseMatrix {
+    let var_r = MODEL_ERROR_SIGMA * MODEL_ERROR_SIGMA;
+    let sigma_v = n0 / SECONDS_PER_MINUTE * MODEL_ERROR_SIGMA;
+    let var_v = sigma_v * sigma_v;
+    match measurement {
+        CheckedMeasurement::State { noise, .. } => {
+            let mut r = *noise;
+            for (i, row) in r.iter_mut().enumerate() {
+                row[i] += if i < 3 { var_r } else { var_v };
+            }
+            NoiseMatrix::State(r)
+        }
+        CheckedMeasurement::Position { noise, .. } => {
+            let mut r = *noise;
+            for (i, row) in r.iter_mut().enumerate() {
+                row[i] += var_r;
+            }
+            NoiseMatrix::Position(r)
+        }
+    }
+}
+
+/// Cholesky factor of a total noise covariance
+///
+/// # Arguments
+/// * `r` - The total noise covariance R_j
+///
+/// # Returns
+/// * `Some(l)` - The lower-triangular factor L_j, with R_j = L_j*L_j^T
+/// * `None` - If R_j is not positive definite
+pub(crate) fn noise_factor(r: &NoiseMatrix) -> Option<NoiseMatrix> {
+    match r {
+        NoiseMatrix::State(r) => cholesky(r).map(NoiseMatrix::State),
+        NoiseMatrix::Position(r) => cholesky(r).map(NoiseMatrix::Position),
+    }
+}
+
+/// Noise factors of every observation
+///
+/// Builds R_j and its factor L_j for each observation once, for the n0 fixed
+/// at the start of the fit, so the weights stay the same through every
+/// iteration and outlier pass. The model-error term keeps every R_j positive
+/// definite unless a measurement-noise covariance far larger than the model
+/// error carries a roundoff-sized negative eigenvalue that cancels it.
+///
+/// # Arguments
+/// * `observations` - The checked observations
+/// * `n0` - The reference mean motion fixed for the fit \[rad/min\]
+///
+/// # Returns
+/// * `factors` - L_j for each observation, in input order
+///
+/// # Errors
+/// * [`FitError::InvalidObservation`] - With the first failing index, if an
+///   observation's R_j is not positive definite
+pub(crate) fn noise_factors(
+    observations: &[CheckedObservation],
+    n0: f64,
+) -> Result<Vec<NoiseMatrix>, FitError> {
+    observations
+        .iter()
+        .enumerate()
+        .map(|(index, obs)| {
+            noise_factor(&total_covariance(&obs.measurement, n0))
+                .ok_or(FitError::InvalidObservation { index })
+        })
+        .collect()
+}
+
+/// Normalized residual of one observation
+///
+/// Equation 3 of the fit plan: rho_j = |L_j^-1 * y_j| / sqrt(m_j), the
+/// whitened residual's norm per measured component, so a full state and a
+/// position with the same error in every component score the same.
+///
+/// # Arguments
+/// * `l` - The noise factor L_j \[N x N\]
+/// * `y` - The residual y_j, observed minus computed \[N\]
+///
+/// # Returns
+/// * `rho` - The normalized residual
+pub(crate) fn normalized_residual<const N: usize>(l: &[[f64; N]; N], y: &[f64; N]) -> f64 {
+    let w = solve_lower(l, y);
+    sqrt(w.iter().map(|x| x * x).sum::<f64>() / N as f64)
 }
 
 /// Convert a time to a split Julian date
@@ -2408,5 +2540,206 @@ mod tests {
             );
             assert!(!message.ends_with('.'), "{message}");
         }
+    }
+
+    /// Mean motion in rad/min from rev/day
+    ///
+    /// # Arguments
+    /// * `revs_per_day` - The mean motion \[revs/day\]
+    ///
+    /// # Returns
+    /// * `n` - The mean motion \[rad/min\]
+    fn rad_per_min(revs_per_day: f64) -> f64 {
+        revs_per_day * 2.0 * PI / MINUTES_PER_DAY
+    }
+
+    /// The checked form of an observation that must validate
+    ///
+    /// # Arguments
+    /// * `obs` - The observation
+    ///
+    /// # Returns
+    /// * `checked` - The checked observation
+    ///
+    /// # Panics
+    /// * If the observation fails validation
+    fn checked(obs: &FitObservation) -> CheckedObservation {
+        validate_observation(0, obs).expect("valid observation")
+    }
+
+    /// R_j is the measurement noise plus the model-error term
+    ///
+    /// # Panics
+    /// * If a model-error term or a sum differs from equation 3
+    #[test]
+    fn test_total_covariance() {
+        // Velocity sigma n0 * sigma_model: about 1.1 m/s in LEO, 0.07 m/s at GEO
+        for (revs_per_day, sigma_v) in [(15.5, 1.127e-3), (1.0027, 7.29e-5)] {
+            let n0 = rad_per_min(revs_per_day);
+            let NoiseMatrix::State(r) =
+                total_covariance(&checked(&state_at(0, None)).measurement, n0)
+            else {
+                panic!("expected a state")
+            };
+            let var_v = (n0 / 60.0) * (n0 / 60.0);
+            assert_eq!(r, diagonal([1.0, 1.0, 1.0, var_v, var_v, var_v]));
+            assert!(abs(sqrt(r[3][3]) / sigma_v - 1.0) < 1e-3);
+        }
+
+        // A position's term doesn't depend on n0
+        let position = checked(&position_at(0, None)).measurement;
+        assert_eq!(
+            total_covariance(&position, rad_per_min(15.5)),
+            NoiseMatrix::Position(diagonal([1.0; 3]))
+        );
+        assert_eq!(
+            total_covariance(&position, rad_per_min(1.0)),
+            NoiseMatrix::Position(diagonal([1.0; 3]))
+        );
+
+        // Measurement noise is added to the model term, correlations included
+        let n0 = rad_per_min(15.5);
+        let var_v = (n0 / 60.0) * (n0 / 60.0);
+        let mut cov = diagonal([0.04, 0.04, 0.04, 1e-8, 1e-8, 1e-8]);
+        cov[1][4] = 1e-5;
+        cov[4][1] = 1e-5;
+        let obs = checked(&state_at(0, Some(FitStateNoise::Covariance(cov))));
+        let NoiseMatrix::State(r) = total_covariance(&obs.measurement, n0) else {
+            panic!("expected a state")
+        };
+        for i in 0..6 {
+            for j in 0..6 {
+                let model = match (i == j, i < 3) {
+                    (false, _) => 0.0,
+                    (true, true) => 1.0,
+                    (true, false) => var_v,
+                };
+                assert_eq!(r[i][j], cov[i][j] + model);
+            }
+        }
+    }
+
+    /// Equivalent noise forms give the same R_j and L_j, and L_j whitens
+    ///
+    /// # Panics
+    /// * If equivalent forms differ, a factor doesn't reproduce R_j, or a
+    ///   whitened norm differs from the rotated weights
+    #[test]
+    fn test_noise_forms_agree() {
+        let n0 = rad_per_min(15.5);
+        let model = |obs: &FitObservation| {
+            let measurement = checked(obs).measurement;
+            let r = total_covariance(&measurement, n0);
+            (r, noise_factor(&r).expect("positive definite"))
+        };
+
+        // Sigma, diagonal covariance, and zero noise against none
+        let sigma = model(&position_at(0, Some(FitPositionNoise::Sigma(0.3))));
+        let cov = FitPositionNoise::Covariance(diagonal([0.3 * 0.3; 3]));
+        assert_eq!(sigma, model(&position_at(0, Some(cov))));
+        assert_eq!(
+            model(&position_at(0, None)),
+            model(&position_at(0, Some(FitPositionNoise::Sigma(0.0))))
+        );
+        let sigmas = FitStateNoise::Sigmas {
+            position: 0.3,
+            velocity: 2e-4,
+        };
+        let cov = FitStateNoise::Covariance(diagonal(core::array::from_fn(|i| {
+            if i < 3 { 0.3 * 0.3 } else { 2e-4 * 2e-4 }
+        })));
+        assert_eq!(
+            model(&state_at(0, Some(sigmas))),
+            model(&state_at(0, Some(cov)))
+        );
+        let zero = FitStateNoise::Sigmas {
+            position: 0.0,
+            velocity: 0.0,
+        };
+        assert_eq!(model(&state_at(0, None)), model(&state_at(0, Some(zero))));
+
+        // The factor reproduces R_j
+        let (NoiseMatrix::State(r), NoiseMatrix::State(l)) = model(&state_at(0, Some(sigmas)))
+        else {
+            panic!("expected a state")
+        };
+        for i in 0..6 {
+            for j in 0..6 {
+                let llt: f64 = (0..6).map(|k| l[i][k] * l[j][k]).sum();
+                assert!(abs(llt - r[i][j]) <= 1e-15 * r[i][i].max(r[j][j]));
+            }
+        }
+
+        // A rotated, anisotropic covariance (10 m against 10 km) and a
+        // singular one: |L^-1*y|^2 = sum_k (rot^T*y)_k^2 / (variance_k + 1)
+        let rot = rotation(0.7, 1.1, -2.3);
+        let y = [1.3, -0.4, 2.2];
+        for variances in [[1e-4, 100.0, 100.0], [0.0, 0.0, 4.0]] {
+            let noise = FitPositionNoise::Covariance(rotate_covariance(&rot, variances));
+            let (_, NoiseMatrix::Position(l)) = model(&position_at(0, Some(noise))) else {
+                panic!("expected a position")
+            };
+            let expected: f64 = (0..3)
+                .map(|k| {
+                    let along: f64 = (0..3).map(|i| rot[i][k] * y[i]).sum();
+                    along * along / (variances[k] + 1.0)
+                })
+                .sum();
+            let rho = normalized_residual(&l, &y);
+            assert!(abs(3.0 * rho * rho / expected - 1.0) < 1e-12);
+        }
+    }
+
+    /// The same error in every component scores the same rho for a position
+    /// and a state
+    ///
+    /// # Panics
+    /// * If the two normalized residuals differ
+    #[test]
+    fn test_outlier_normalization() {
+        let n0 = rad_per_min(15.5);
+        let sigma_v = n0 / 60.0;
+        let factors = noise_factors(
+            &[checked(&position_at(0, None)), checked(&state_at(0, None))],
+            n0,
+        )
+        .expect("positive definite");
+        let (NoiseMatrix::Position(l_pos), NoiseMatrix::State(l_state)) = (factors[0], factors[1])
+        else {
+            panic!("expected a position then a state")
+        };
+
+        // A 40 km glitch in every component, velocity in its own sigma units
+        let glitch = 40.0;
+        let y_pos = [glitch; 3];
+        let y_state: [f64; 6] =
+            core::array::from_fn(|i| if i < 3 { glitch } else { glitch * sigma_v });
+        let rho_pos = normalized_residual(&l_pos, &y_pos);
+        let rho_state = normalized_residual(&l_state, &y_state);
+        assert!(abs(rho_pos / glitch - 1.0) < 1e-12);
+        assert!(abs(rho_state / rho_pos - 1.0) < 1e-12);
+
+        // Without the sqrt(m_j) normalization the state would score sqrt(2) higher
+        let raw = |rho: f64, m: f64| rho * sqrt(m);
+        assert!(abs(raw(rho_state, 6.0) / raw(rho_pos, 3.0) - sqrt(2.0)) < 1e-12);
+    }
+
+    /// A measurement-noise covariance that cancels the model term is invalid
+    ///
+    /// # Panics
+    /// * If the observation is accepted or the wrong index is reported
+    #[test]
+    fn test_noise_factor_rejects() {
+        // Passes validation: the -2.5 km^2 eigenvalue is within the
+        // positive-semidefinite shift of a block whose mean variance is about
+        // 3e12 km^2, but it outweighs the 1 km^2 model term
+        let cov = FitPositionNoise::Covariance(diagonal([-2.5, 4.5e12, 4.5e12]));
+        let bad = checked(&position_at(1, Some(cov)));
+        let good = checked(&state_at(0, None));
+        assert!(matches!(
+            noise_factors(&[good, bad], rad_per_min(15.5)),
+            Err(FitError::InvalidObservation { index: 1 })
+        ));
+        assert!(noise_factors(&[good], rad_per_min(15.5)).is_ok());
     }
 }
