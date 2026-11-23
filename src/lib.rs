@@ -27,10 +27,10 @@ extern crate alloc;
 extern crate std;
 
 pub mod common;
-// Not yet called outside its own tests; remove this allow once `fit_gp` uses
-// all of it (implementation step 7)
+// The crate-internal helpers are not yet called outside their own tests;
+// remove this allow once `fit_gp` uses all of them (implementation step 7)
 #[cfg_attr(not(test), allow(dead_code))]
-mod fit;
+pub mod fit;
 pub mod gp;
 // Not yet called outside its own tests; remove this allow once the GP fit
 // uses all of it (implementation step 6)
@@ -42,6 +42,11 @@ pub mod time;
 
 #[doc(inline)]
 pub use common::{CoordinateFrame, StateVector, WGS72, WGS84, Wgs, calc_period, deg2rad};
+#[doc(inline)]
+pub use fit::{
+    FitError, FitMeasurement, FitObservation, FitOptions, FitPositionNoise, FitResidual, FitResult,
+    FitStateNoise, GpMetadata, new_fit_observation,
+};
 #[doc(inline)]
 pub use gp::{
     GenPerturbElementSet, GpError, from_omm_kvn_lines, from_omm_kvn_string, from_tle_lines,

@@ -13,13 +13,13 @@ The method builds on Vallado & Crawford, *SGP4 Orbit Determination*, AIAA 2008-6
 **What this means in practice.** SGP4's model error, about 1 km in LEO, dominates every residual from a good source (GPS, a high-fidelity propagator), so those observations are weighted about equally whether or not their measurement noise is given, which is close to optimal for them. Measurement noise matters when it is comparable to or larger than the model error (radar, optical angles, poor receivers), and then it down-weights those observations in the directions where they are poor.
 
 ## Implementation steps
-Each step is one reviewable change with its tests, built on the steps before it. `fit_gp` is public from step 3 and fits end to end from step 7. Every step's "done when" also includes `cargo build --no-default-features` succeeding (see the no_std decision).
+Each step is one reviewable change with its tests, built on the steps before it. The fit types are public from step 3; `fit_gp` is public from step 7, where it first fits end to end. Every step's "done when" also includes `cargo build --no-default-features` succeeding (see the no_std decision).
 
 | Step | Builds | Done when |
 |---|---|---|
 | 1. Linear algebra | Householder QR, 7×7 Jacobi SVD and Cholesky, in the crate with no new dependency (Solve accuracy). | The QR/SVD accuracy and re-solve tests pass; Cholesky rejects matrices that aren't positive definite. |
 | 2. Elements and time | Equinoctial ↔ classical elements with f_r (equations 1 and 9), state → osculating equinoctial, τ from the split Julian date, epoch default and rounding. | The element round-trip and exact-zero rows of the Output tests pass. |
-| 3. API and validation | Every public type, with constructors and `Default`, and algorithm step 1. | The Options tests, the `InvalidObservation` checks and the `TooFewObservations` edge cases pass. |
+| 3. API and validation | Every public type, with the observation constructor and `Default`, and algorithm step 1. | The Options tests, the `InvalidObservation` checks and the `TooFewObservations` edge cases pass. |
 | 4. Noise model | Rⱼ, Lⱼ, whitening and ρⱼ for states and positions, for a given n₀ (equation 3). | Equivalent noise forms give the same Rⱼ and Lⱼ, and the outlier-normalization test passes on ρⱼ alone. |
 | 5. Starting guess | Fixed-point loop (single and two-loop), nearest-state candidates, Gibbs/Herrick–Gibbs triples, n₀, scoring and the mode record (algorithm steps 2–3). | The candidate-selection parts of the starting-guess and starting-triple tests and the n₀ part of the velocity-term check pass; the Orekit cases' guesses meet the Orekit fixed-point tolerance. |
 | 6. LM solve | Residuals, the finite-difference Jacobian with its one-sided rules, the B* prior row, column scaling, the LM step, convergence and held flags (algorithm steps 4–5, equations 4–7). | The finite-difference, LM-convergence and held-flag tests pass, and noise-free recovery holds on the internal elements. |
@@ -59,7 +59,7 @@ Each step is one reviewable change with its tests, built on the steps before it.
 | Covariance | Exactly one covariance, always valid: σ̂₀²·P, the standard least-squares covariance scaled by how well the fit actually matched, as Orekit returns; for a single state, where σ̂₀² is `None`, P from the noise model. There is no optional or NaN covariance. It is a diagnostic: a TLE carries no covariance, and no covariance from the fit describes prediction beyond the arc. The docs must say it is the formal covariance, which assumes independent errors; that it is optimistic for dense data, because SGP4's model error is correlated in time; and that the honest measures of a TLE's accuracy are its residual RMS and its prediction error against held-out data. There is no robust (autocorrelation-consistent) estimate. |
 | Output | Residuals and RMS values come from the returned `Sgp4`, re-initialized from the final GP set, so they describe exactly what the user propagates. Residuals are observed − computed, with RIC axes from the fitted state. RMS values are unweighted 3D norms over kept observations; `rms_velocity` and the velocity residuals are `None` where there is no velocity. `FitResult` includes `retrograde_factor`, without which the covariance can't be interpreted. `rejected` is ascending. The docs must say that `velocity_ric` is a rotated TEME residual, not the rate of change of the RIC position error. |
 | no_std | The crate is `#![no_std]` with `alloc`, and the fit stays within that: `Vec`, `String` and `Box` come from `alloc`, and all math (QR, SVD, Cholesky, Gibbs/Herrick–Gibbs, element conversions) uses `libm` (`sqrt`, `atan2`, …), never the `f64` methods that need `std`. No new dependency. Every fit type and function builds with `--no-default-features`. |
-| API stability | Every public struct and enum in the fit API is `#[non_exhaustive]`, so later releases add fields, variants and types without a breaking change. Fields that position-only observations leave empty (the velocity residual, `rms_velocity`) are `Option`. Callers build options with `FitOptions::default()` and assign fields, and build observations with the constructors, because struct literals don't work on non-exhaustive structs outside the crate. 0.4.0 is the cheap moment: adding the attribute later would itself be breaking. The `Fit` prefix is kept because everything is re-exported at the crate root. |
+| API stability | Every public struct and enum in the fit API is `#[non_exhaustive]`, so later releases add fields, variants and types without a breaking change. The `FitMeasurement` variants carry their fields inline and are built as struct literals, so a new field on an existing variant would be breaking; new noise forms, frames and measurement kinds go into their own non-exhaustive enums instead. Fields that position-only observations leave empty (the velocity residual, `rms_velocity`) are `Option`. Callers build options with `FitOptions::default()` and assign fields, and build observations with `new_fit_observation`, because struct literals don't work on non-exhaustive structs outside the crate. 0.4.0 is the cheap moment: adding the attribute later would itself be breaking. The `Fit` prefix is kept because everything is re-exported at the crate root. |
 
 ## API
 Field names and types are provisional.
@@ -71,25 +71,19 @@ pub struct FitObservation {
     pub measurement: FitMeasurement,
 }
 
-#[non_exhaustive]                         // angles, range, ... later
-pub enum FitMeasurement {
-    State(FitStateObs),
-    Position(FitPositionObs),
-}
-
-#[non_exhaustive]
-pub struct FitStateObs {
-    pub frame: CoordinateFrame,           // TEME is the only frame today
-    pub position: [f64; 3],               // [km]
-    pub velocity: [f64; 3],               // [km/s]
-    pub noise: Option<FitStateNoise>,     // measurement noise; None: model term only
-}
-
-#[non_exhaustive]
-pub struct FitPositionObs {
-    pub frame: CoordinateFrame,
-    pub position: [f64; 3],               // [km]
-    pub noise: Option<FitPositionNoise>,  // measurement noise; None: model term only
+#[non_exhaustive]                         // angles, range, ... later as new variants
+pub enum FitMeasurement {                 // variants are built as struct literals
+    State {
+        frame: CoordinateFrame,           // TEME is the only frame today
+        position: [f64; 3],               // [km]
+        velocity: [f64; 3],               // [km/s]
+        noise: Option<FitStateNoise>,     // measurement noise; None: model term only
+    },
+    Position {
+        frame: CoordinateFrame,
+        position: [f64; 3],               // [km]
+        noise: Option<FitPositionNoise>,  // measurement noise; None: model term only
+    },
 }
 
 #[non_exhaustive]                         // e.g. RIC sigmas can be added later
@@ -104,22 +98,13 @@ pub enum FitPositionNoise {
     Covariance([[f64; 3]; 3]),            // [km²]
 }
 
-impl FitObservation {
-    pub fn new(datetime: DateTime, measurement: FitMeasurement) -> Self;
-    /// Copies position, velocity and frame; no measurement noise.
-    pub fn state(datetime: DateTime, state: &StateVector) -> Self;
-    /// Position only, no measurement noise.
-    pub fn position(datetime: DateTime, frame: CoordinateFrame, position: [f64; 3]) -> Self;
-}
-
-impl FitStateObs {
-    pub fn new(frame: CoordinateFrame, position: [f64; 3], velocity: [f64; 3],
-               noise: Option<FitStateNoise>) -> Self;
-}
-
-impl FitPositionObs {
-    pub fn new(frame: CoordinateFrame, position: [f64; 3], noise: Option<FitPositionNoise>) -> Self;
-}
+// The one constructor, for every kind of measurement (a free function, as
+// everywhere in the crate):
+//
+//     let obs = new_fit_observation(t, FitMeasurement::Position {
+//         frame: CoordinateFrame::TEME, position: r, noise: None,
+//     });
+pub fn new_fit_observation(datetime: DateTime, measurement: FitMeasurement) -> FitObservation;
 
 // GpMetadata and FitOptions implement Default. Being #[non_exhaustive], they are
 // built from the default with fields assigned:
@@ -205,8 +190,8 @@ pub fn fit_gp(obs: &[FitObservation], opts: &FitOptions) -> Result<FitResult, Fi
 
 ## Algorithm
 1. **Validate input.** Checks run in this order and stop at the first failure.
-   1. Options: `bstar_prior_width` finite and positive; `bstar_prior_center`, if set, finite (no range check: negative B* is legal, and format limits belong to the writers); `outlier_cutoff`, if set, finite and ≥ 3; `max_rejected_fraction` finite, > 0 and < 0.5; `max_iterations` ≥ 1; `tolerance` finite and positive; `initial_damping` and `max_damping` finite and positive, with `initial_damping` < `max_damping`; `epoch`, if set, a valid date. Otherwise `InvalidOptions { field }`, naming the first field that failed. Metadata is not checked.
-   2. Each observation: time a valid date; position and any velocity finite; any measurement-noise sigma finite and ≥ 0; any measurement-noise covariance finite, symmetric to a relative tolerance of about 1e-12 (then symmetrized), and positive semidefinite, checked by Cholesky of R_sensor + ε·tr(R_sensor)·I with ε ≈ 1e-12 (an all-zero matrix counts as no noise). Otherwise `InvalidObservation { index }`. There is no range check on magnitudes; getting units right is the caller's job.
+   1. Options: `bstar_prior_width` finite and positive; `bstar_prior_center`, if set, finite (no range check: negative B* is legal, and format limits belong to the writers); `outlier_cutoff`, if set, finite and ≥ 3; `max_rejected_fraction` finite, > 0 and < 0.5; `max_iterations` ≥ 1; `tolerance` finite and positive; `initial_damping` and `max_damping` finite and positive, with `initial_damping` < `max_damping` (a violation names `max_damping`); `epoch`, if set, a valid date. Otherwise `InvalidOptions { field }`, naming the first field that failed. Metadata is not checked.
+   2. Each observation: time a valid date; position and any velocity finite; any measurement-noise sigma finite and ≥ 0; any measurement-noise covariance finite, symmetric to a relative tolerance of about 1e-12 (then symmetrized), and positive semidefinite. Each 3-vector block (position; velocity) is judged in its own units: component i gets the scale dᵢ = √(mean variance of its block), entry (i, j) may be asymmetric by at most 1e-12·dᵢ·dⱼ, and the matrix scaled by 1/(dᵢ·dⱼ) plus ε·I, ε ≈ 1e-12, must have a Cholesky factor. One shift by ε·tr(R_sensor) would hide a negative eigenvalue in a velocity block (km²/s²) beside km² position variances. A block with zero scale must be exactly zero, correlations included; an all-zero matrix counts as no noise. Otherwise `InvalidObservation { index }`. There is no range check on magnitudes; getting units right is the caller's job.
    3. The set: at least one full state or 3 distinct position times, or `TooFewObservations`. With the prior row this always gives at least p = 7 rows.
 2. **Starting guess.**
    1. **B*₀** is `bstar_prior_center` if set, otherwise the initial GP set's B*, otherwise 0, for every candidate. It is also the prior center.
@@ -568,9 +553,9 @@ Run these on an orbit and arc where the data determines B*, such as LEO over sev
 | Residuals versus the returned `Sgp4` | Propagating `sgp4` and subtracting from each observation reproduces `residuals` exactly |
 | `NotConverged` | All fields filled; `residuals` and `rejected` match the last accepted iterate |
 
-**Options.** Each invalid value returns `InvalidOptions { field }` naming that field: `bstar_prior_width` ≤ 0 or not finite; `bstar_prior_center` set but not finite; `outlier_cutoff` below 3 or not finite; `max_rejected_fraction` ≤ 0, ≥ 0.5 or not finite; `max_iterations` = 0; `tolerance` ≤ 0 or not finite; `initial_damping` or `max_damping` ≤ 0 or not finite, or `initial_damping` ≥ `max_damping`; `epoch` not a valid date. With two invalid fields, the first in validation order is named.
+**Options.** Each invalid value returns `InvalidOptions { field }` naming that field: `bstar_prior_width` ≤ 0 or not finite; `bstar_prior_center` set but not finite; `outlier_cutoff` below 3 or not finite; `max_rejected_fraction` ≤ 0, ≥ 0.5 or not finite; `max_iterations` = 0; `tolerance` ≤ 0 or not finite; `initial_damping` or `max_damping` ≤ 0 or not finite, or `initial_damping` ≥ `max_damping`, which names `max_damping`; `epoch` not a valid date. With two invalid fields, the first in validation order is named.
 
-**API stability.** Doctests, which compile as an outside crate, build `FitOptions` from `default()` with assigned fields, build observations through the constructors, and read every `FitResult` field.
+**API stability.** Doctests, which compile as an outside crate, build `FitOptions` from `default()` with assigned fields, build mixed observations through `new_fit_observation` and `FitMeasurement` literals, and read every `FitResult` field.
 
 **Practical notes.**
 - **Random numbers:** fixed seeds throughout, with a small SplitMix64 + Box–Muller generator in the test module, so fixtures don't shift with `rand` versions.
@@ -646,7 +631,7 @@ Closed items, in the order they were settled. The current design is in the secti
 - **9. Convergence criteria.** Mahalanobis step test with a noise-free floor; `initial_damping` and `max_damping` are options.
 - **10. Input validation.** Unsorted input and duplicate timestamps are accepted; zero degrees of freedom occurs only for a single state, where σ̂₀² is `None`.
 - **11. Single state.** `gp_from_state` was dropped; a single state goes through `fit_gp` as a square system.
-- **12. Observation type.** A time plus a `#[non_exhaustive]` `FitMeasurement` enum, so new kinds don't break the API, with constructors for the common cases.
+- **12. Observation type.** A time plus a `#[non_exhaustive]` `FitMeasurement` enum, so new kinds don't break the API. Its variants carry their fields inline (decision 31).
 - **15. Rev number at a moved epoch.** Advanced by whole revolutions, as Orekit does.
 - **16. Starting guess.** Up to 3 independent candidates scored by median ρ: the nearest states, topped up with Gibbs/Herrick–Gibbs triples.
 - **17. Weakly observable B\*.** Solved by the B* prior. B*'s effect on position falls steadily with altitude and grows about as t². At GEO, B* = 1 shifts position by about 3 mm at 6 hours and 6 m at 14 days, and the 1σ B* over 14 days is about 4 (position-only, σ_r = 100 m). The default prior also limits how much B* can absorb unmodeled forces at high altitude; users who want that can loosen `bstar_prior_width`.
@@ -661,6 +646,7 @@ Closed items, in the order they were settled. The current design is in the secti
 - **28. Roadmap 1 merged into 0.4.0.** Positions, Gibbs/Herrick–Gibbs triples and measurement noise were the only roadmap step left, and the 0.4.0 API was already shaped around them. They moved in unchanged except for the `noise` argument on `FitStateObs::new`, `StartingGuessFailed` covering data that yields no candidate, and the position outlier cutoff. The Scope table became implementation steps.
 - **29. Red team after the merge.** Noise validation relaxed: sigmas ≥ 0, covariances symmetric to roundoff and positive semidefinite. Sparse position-only data returning `StartingGuessFailed` is intended and documented. The isotropic model-error term is a recorded limitation. Added a real-data measurement-noise test and a short position-only pass to the rank-test fixtures.
 - **30. no_std.** The fit follows the crate's `#![no_std]` + `alloc` setup: `libm` for all math, no new dependency, and a `--no-default-features` build in every implementation step.
+- **31. Step 3 (API and validation).** One constructor, the free function `new_fit_observation(datetime, measurement)`, for every kind of measurement. The `FitStateObs` and `FitPositionObs` payload structs were dropped: `FitMeasurement::State` and `::Position` carry their fields inline and are built as struct literals, which a `#[non_exhaustive]` enum allows outside the crate. The cost is that a new field on an existing variant would be breaking, which is unlikely because noise forms, frames and new kinds each have their own non-exhaustive enum. The per-kind shortcuts (`from_state`, `from_position`) were dropped too. The covariance check scales each position or velocity block by its own variance, because one trace-based shift hides velocity-block errors. `FitError` has a hand-written `Debug`, because `Sgp4` has none. The noise enums allow `clippy::large_enum_variant`: boxing a 6×6 covariance would cost an allocation per observation. The fit types are re-exported at the crate root now; `fit_gp` follows in step 7.
 
 ## References
 - D. A. Vallado and P. Crawford, *SGP4 Orbit Determination*, AIAA 2008-6770.

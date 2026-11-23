@@ -1,27 +1,291 @@
 //! Module for fitting a general perturbations element set to timestamped
 //! states and positions.
 //!
+//! The public types describe the fit's input and output: observations
+//! ([`FitObservation`]) with optional measurement noise, options
+//! ([`FitOptions`]), and the result ([`FitResult`]) or error ([`FitError`]).
+//! Each observation pairs a time with a [`FitMeasurement`], so one fit can
+//! mix kinds of measurement. Observations are built with
+//! [`new_fit_observation`] and options from [`FitOptions::default`] with
+//! fields assigned, because the fit structs are `#[non_exhaustive]`.
+//!
 //! The fit works in equinoctial elements, which stay well defined for
 //! circular and equatorial orbits where the classical argument of perigee and
-//! node are not. This module holds the conversions between equinoctial
-//! elements, the classical elements a TLE or OMM stores, and TEME states, and
-//! the time helpers that place observations relative to the fit epoch.
+//! node are not. This module also holds the conversions between equinoctial
+//! elements, the classical elements a TLE or OMM stores, and TEME states, the
+//! time helpers that place observations relative to the fit epoch, and the
+//! validation of the input.
 
 // ------------------
 // External Libraries
 // ------------------
+use alloc::boxed::Box;
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::f64::consts::PI;
+use core::fmt;
 
 // ------------------
 // Internal Libraries
 // ------------------
-use crate::math::{atan2, cos, rem_euclid, sin, sqrt};
-use crate::time::{DateTime, round_to_tle_epoch, utc2jday};
+use crate::common::{CoordinateFrame, Wgs};
+use crate::gp::GenPerturbElementSet;
+use crate::linalg::cholesky;
+use crate::math::{abs, atan2, cos, rem_euclid, sin, sqrt};
+use crate::sgp4::{Sgp4, Sgp4Error};
+use crate::time::{DateTime, Timezone, round_to_tle_epoch, utc2jday};
 
 // -------
 // Structs
 // -------
+
+/// One timestamped observation for the GP fit
+///
+/// A time and a [`FitMeasurement`]. Every kind of measurement goes through
+/// this one type, so kinds can be mixed freely in one list, in any order,
+/// with repeated times. Built with [`new_fit_observation`].
+///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::{CoordinateFrame, DateTime, FitMeasurement, Timezone, new_fit_observation};
+///
+/// // A TEME state at 2024-03-01 12:00:00 UTC, with no measurement noise
+/// let datetime = DateTime {
+///     year: 2024,
+///     month: 3,
+///     day: 1,
+///     hour: 12,
+///     minute: 0,
+///     second: 0.0,
+///     timezone: Timezone::UTC,
+/// };
+/// let measurement = FitMeasurement::State {
+///     frame: CoordinateFrame::TEME,
+///     position: [6778.0, 0.0, 0.0],
+///     velocity: [0.0, 4.8, 5.9],
+///     noise: None,
+/// };
+/// let obs = new_fit_observation(datetime, measurement);
+///
+/// assert_eq!(obs.datetime, datetime);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub struct FitObservation {
+    /// Observation time; UTC is the only time scale today
+    pub datetime: DateTime,
+
+    /// What was measured at that time
+    pub measurement: FitMeasurement,
+}
+
+/// Identifying fields for the fitted element set
+///
+/// Each field that is set overrides the same field of the initial GP set, if
+/// one is given; each field that is `None` comes from the initial GP set, or
+/// else from the default: empty name and designator, catalog number 0,
+/// classification `U`, and element set and rev numbers 0. The fit doesn't
+/// check these against any output format; the TLE and OMM writers do.
+///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::GpMetadata;
+///
+/// // Name the result and give it a catalog number; leave the rest unset
+/// let mut metadata = GpMetadata::default();
+/// metadata.name = Some("ISS (ZARYA)".into());
+/// metadata.catalog_number = Some(25544);
+///
+/// assert_eq!(metadata.classification, None);
+/// ```
+#[derive(Debug, Default, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct GpMetadata {
+    /// Object name
+    pub name: Option<String>,
+
+    /// Satellite catalog number
+    pub catalog_number: Option<i32>,
+
+    /// International designator
+    pub intl_designator: Option<String>,
+
+    /// Classification, such as `U` for unclassified
+    pub classification: Option<char>,
+
+    /// Element set number; never incremented by the fit
+    pub element_set_number: Option<i32>,
+
+    /// Revolution number at the fit epoch, used as given
+    pub rev_number: Option<i64>,
+}
+
+/// Options for the GP fit
+///
+/// Built from [`FitOptions::default`] with fields assigned. Every value is
+/// checked before the fit starts, and the first one out of range is named in
+/// [`FitError::InvalidOptions`]; the metadata is not checked.
+///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::FitOptions;
+///
+/// // Center the B* prior on a ballistic-coefficient estimate and name the result
+/// let mut opts = FitOptions::default();
+/// opts.bstar_prior_center = Some(2.5e-4);
+/// opts.metadata.catalog_number = Some(25544);
+///
+/// assert_eq!(opts.outlier_cutoff, Some(10.0));
+/// ```
+#[derive(Clone)]
+#[non_exhaustive]
+pub struct FitOptions {
+    /// Fit epoch; `None` uses the latest observation time. Either way it is
+    /// rounded to the nearest 1e-8 day, the TLE epoch resolution
+    pub epoch: Option<DateTime>,
+
+    /// Element set that gives the starting orbit, ndot and nddot, the prior
+    /// center unless `bstar_prior_center` is set, and any metadata not set in
+    /// `metadata`
+    pub initial_guess: Option<GenPerturbElementSet>,
+
+    /// Identifying fields for the result
+    pub metadata: GpMetadata,
+
+    /// Center of the B* prior \[1/ER\]; `None` uses the initial GP set's B*,
+    /// or else 0. Must be finite if set
+    pub bstar_prior_center: Option<f64>,
+
+    /// One-sigma width of the B* prior \[1/ER\], finite and positive; default 1e-2
+    pub bstar_prior_width: f64,
+
+    /// Outlier cutoff as a multiple of the median normalized residual,
+    /// finite and at least 3; default `Some(10.0)`, and `None` turns
+    /// rejection off
+    pub outlier_cutoff: Option<f64>,
+
+    /// Largest fraction of the input observations that may be rejected,
+    /// above 0 and below 0.5; default 0.25
+    pub max_rejected_fraction: f64,
+
+    /// Jacobian builds per Levenberg-Marquardt run, at least 1
+    pub max_iterations: usize,
+
+    /// Convergence threshold on the Gauss-Newton step, in units of its own
+    /// one-sigma size, finite and positive
+    pub tolerance: f64,
+
+    /// Starting Levenberg-Marquardt damping, finite, positive and below
+    /// `max_damping`; default 1e-3
+    pub initial_damping: f64,
+
+    /// Damping above which the fit is stuck, finite and positive, and must
+    /// exceed `initial_damping`; default 1e10
+    pub max_damping: f64,
+
+    /// Earth model; `None` uses WGS-72
+    pub wgs: Option<Wgs>,
+}
+
+/// Result of a GP fit
+///
+/// The fitted element set ready to propagate, its residuals against every
+/// input observation, and its covariance. Residuals and RMS values come from
+/// the returned `sgp4`, so they describe exactly what is propagated.
+///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::FitResult;
+///
+/// // Summarize a fit: position RMS in meters and the number kept
+/// fn summarize(result: &FitResult) -> (f64, usize) {
+///     let kept = result.residuals.len() - result.rejected.len();
+///     (result.rms_position * 1000.0, kept)
+/// }
+/// ```
+#[derive(Clone)]
+#[non_exhaustive]
+pub struct FitResult {
+    /// The fitted element set, initialized and ready to propagate or write out
+    pub sgp4: Sgp4,
+
+    /// Unweighted RMS of the 3D position residuals over kept observations \[km\]
+    pub rms_position: f64,
+
+    /// Unweighted RMS of the 3D velocity residuals over kept observations
+    /// \[km/s\]; `None` if no kept observation has a velocity
+    pub rms_velocity: Option<f64>,
+
+    /// One residual per input observation, in input order, including
+    /// rejected ones
+    pub residuals: Vec<FitResidual>,
+
+    /// Input indices of the rejected observations, ascending
+    pub rejected: Vec<usize>,
+
+    /// Covariance of the fitted unknowns, the formal covariance scaled by
+    /// `variance_factor` (unscaled for a single state). Order and units:
+    /// n (Kozai) \[rad/min\], a_f, a_g, chi, psi \[\], lambda \[rad\], B* \[1/ER\]
+    pub covariance: [[f64; 7]; 7],
+
+    /// Retrograde factor, +1 or -1, which defines a_f, a_g, chi and psi in
+    /// the covariance
+    pub retrograde_factor: f64,
+
+    /// Variance factor of the fit; `None` with no degrees of freedom (a
+    /// single state)
+    pub variance_factor: Option<f64>,
+
+    /// Jacobian builds, summed over all outlier passes
+    pub iterations: usize,
+}
+
+/// Residual of one observation against the fitted element set
+///
+/// Observed minus computed, from the returned [`Sgp4`]. The RIC axes come
+/// from the fitted state at the observation time: radial along r, cross-track
+/// along r x v, and in-track completing the frame.
+///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::FitResidual;
+///
+/// // Radial position error of one observation, in meters
+/// fn radial_meters(residual: &FitResidual) -> f64 {
+///     residual.position_ric[0] * 1000.0
+/// }
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub struct FitResidual {
+    /// Position residual in TEME \[km\]
+    pub position: [f64; 3],
+
+    /// Velocity residual in TEME \[km/s\]; `None` for a position-only observation
+    pub velocity: Option<[f64; 3]>,
+
+    /// Position residual in radial, in-track, cross-track axes \[km\]
+    pub position_ric: [f64; 3],
+
+    /// TEME velocity residual rotated into the RIC axes \[km/s\]; not the rate
+    /// of change of the RIC position error. `None` for a position-only
+    /// observation
+    pub velocity_ric: Option<[f64; 3]>,
+}
+
+/// A validated observation, ready for the noise model
+///
+/// Built by [`validate_observation`]: the time as a split Julian date, the
+/// measurement in TEME, and the measurement noise as a symmetrized
+/// covariance (all zero without noise).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct CheckedObservation {
+    /// Time as (Julian day, day fraction) from [`crate::utc2jday`]
+    pub time: (f64, f64),
+
+    /// Measurement and its noise covariance
+    pub measurement: CheckedMeasurement,
+}
 
 /// Equinoctial orbital elements
 ///
@@ -86,6 +350,323 @@ pub(crate) struct ClassicalElements {
     pub mean_anomaly: f64,
 }
 
+// -----
+// Enums
+// -----
+
+/// What an observation measured
+///
+/// A full state or a position only, each in a stated frame and with optional
+/// measurement noise. The noise is added to the fit's internal model-error
+/// term, so `None` (or a sigma of 0) still gives the observation a
+/// well-defined weight. More kinds, such as angles or range, can be added as
+/// new variants. The variants are built directly, as struct literals.
+///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::{CoordinateFrame, FitMeasurement, FitPositionNoise, FitStateNoise};
+///
+/// // A GPS state with 10 m and 1 cm/s measurement noise
+/// let state = FitMeasurement::State {
+///     frame: CoordinateFrame::TEME,
+///     position: [6778.0, 0.0, 0.0],
+///     velocity: [0.0, 4.8, 5.9],
+///     noise: Some(FitStateNoise::Sigmas {
+///         position: 0.010,
+///         velocity: 1e-5,
+///     }),
+/// };
+///
+/// // A radar position with 100 m isotropic measurement noise
+/// let position = FitMeasurement::Position {
+///     frame: CoordinateFrame::TEME,
+///     position: [6778.0, 0.0, 0.0],
+///     noise: Some(FitPositionNoise::Sigma(0.1)),
+/// };
+///
+/// assert_ne!(state, position);
+/// ```
+// A covariance variant is about 0.3 kB against 16 bytes for the sigma forms;
+// boxing it would cost an allocation per observation for no real saving
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub enum FitMeasurement {
+    /// Position and velocity
+    State {
+        /// Frame of the position and velocity; TEME is the only frame today
+        frame: CoordinateFrame,
+
+        /// Position \[km\]
+        position: [f64; 3],
+
+        /// Velocity \[km/s\]
+        velocity: [f64; 3],
+
+        /// Measurement noise; `None` uses the model-error term only
+        noise: Option<FitStateNoise>,
+    },
+
+    /// Position only, as from a sensor such as radar
+    Position {
+        /// Frame of the position; TEME is the only frame today
+        frame: CoordinateFrame,
+
+        /// Position \[km\]
+        position: [f64; 3],
+
+        /// Measurement noise; `None` uses the model-error term only
+        noise: Option<FitPositionNoise>,
+    },
+}
+
+/// Measurement noise of a full state
+///
+/// Added to the fit's model-error term, never replacing it, so a sigma of 0
+/// or a singular covariance is accepted. A covariance need only be symmetric
+/// to roundoff, so one rotated from RIC sigmas into TEME passes.
+///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::FitStateNoise;
+///
+/// // 10 m position noise, 1 cm/s velocity noise, no correlation
+/// let noise = FitStateNoise::Sigmas {
+///     position: 0.010,
+///     velocity: 1e-5,
+/// };
+///
+/// assert!(matches!(noise, FitStateNoise::Sigmas { .. }));
+/// ```
+// A covariance variant is about 0.3 kB against 16 bytes for the sigma forms;
+// boxing it would cost an allocation per observation for no real saving
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub enum FitStateNoise {
+    /// Isotropic one-sigma noise, each finite and at least 0
+    Sigmas {
+        /// Position sigma \[km\]
+        position: f64,
+
+        /// Velocity sigma \[km/s\]
+        velocity: f64,
+    },
+
+    /// Full covariance of position then velocity, including position-velocity
+    /// correlation \[km^2, km^2/s, km^2/s^2\]; symmetric and positive semidefinite
+    Covariance([[f64; 6]; 6]),
+}
+
+/// Measurement noise of a position
+///
+/// Added to the fit's model-error term, never replacing it, so a sigma of 0
+/// or a singular covariance is accepted.
+///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::FitPositionNoise;
+///
+/// // 10 m range noise along x, 5 km cross-range noise along y and z
+/// let noise = FitPositionNoise::Covariance([
+///     [1e-4, 0.0, 0.0],
+///     [0.0, 25.0, 0.0],
+///     [0.0, 0.0, 25.0],
+/// ]);
+///
+/// assert!(matches!(noise, FitPositionNoise::Covariance(_)));
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub enum FitPositionNoise {
+    /// Isotropic one-sigma noise \[km\], finite and at least 0
+    Sigma(f64),
+
+    /// Full covariance \[km^2\]; symmetric and positive semidefinite
+    Covariance([[f64; 3]; 3]),
+}
+
+/// GP fit errors
+///
+/// Input errors are found before any propagation, in the order options,
+/// observations, then the set as a whole.
+///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::FitError;
+///
+/// // Name the failed option in a message
+/// let err = FitError::InvalidOptions {
+///     field: "bstar_prior_width",
+/// };
+///
+/// assert!(err.to_string().contains("bstar_prior_width"));
+/// ```
+#[derive(Clone)]
+#[non_exhaustive]
+pub enum FitError {
+    /// The observation at this index has a non-finite value, a time that is
+    /// not a valid date, a negative or non-finite noise sigma, or a noise
+    /// covariance that is not finite, not symmetric, or not positive
+    /// semidefinite
+    InvalidObservation {
+        /// Index of the first invalid observation
+        index: usize,
+    },
+
+    /// An option is out of range, or the epoch is not a valid date
+    InvalidOptions {
+        /// Name of the first invalid option, such as "epoch"
+        field: &'static str,
+    },
+
+    /// No full state and fewer than 3 distinct position times. Outlier
+    /// rejection never causes it
+    TooFewObservations,
+
+    /// No starting guess could be built: without an initial GP set, no
+    /// candidate could be built from the data or SGP4 failed on every one;
+    /// with one, the fixed-point loop at the epoch couldn't evaluate any
+    /// iterate
+    StartingGuessFailed,
+
+    /// SGP4 rejected the initial GP set or the epoch
+    Sgp4(Sgp4Error),
+
+    /// The observations don't determine every unknown, so no covariance and
+    /// no solution can be given
+    Underdetermined,
+
+    /// The fit hit the iteration cap or the damping ceiling, or SGP4 couldn't
+    /// evaluate a Jacobian column on either side. Holds the best solution,
+    /// with its covariance
+    NotConverged(Box<FitResult>),
+}
+
+/// A validated measurement and its noise covariance
+///
+/// In TEME, with the noise as a symmetrized covariance that is all zero
+/// without measurement noise.
+// A covariance variant is about 0.3 kB against 16 bytes for the sigma forms;
+// boxing it would cost an allocation per observation for no real saving
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum CheckedMeasurement {
+    /// Full state
+    State {
+        /// Position \[km\]
+        position: [f64; 3],
+
+        /// Velocity \[km/s\]
+        velocity: [f64; 3],
+
+        /// Measurement noise covariance of position then velocity
+        noise: [[f64; 6]; 6],
+    },
+
+    /// Position only
+    Position {
+        /// Position \[km\]
+        position: [f64; 3],
+
+        /// Measurement noise covariance \[km^2\]
+        noise: [[f64; 3]; 3],
+    },
+}
+
+// ------
+// Traits
+// ------
+
+/// Default fit options
+///
+/// No epoch override, initial GP set or metadata; a B* prior of width 1e-2
+/// centered on the initial GP set's B* or 0; outlier rejection at 10 times the
+/// median normalized residual, rejecting at most a quarter of the
+/// observations; Levenberg-Marquardt damping from 1e-3 up to 1e10; WGS-72.
+impl Default for FitOptions {
+    fn default() -> Self {
+        FitOptions {
+            epoch: None,
+            initial_guess: None,
+            metadata: GpMetadata::default(),
+            bstar_prior_center: None,
+            bstar_prior_width: 1e-2,
+            outlier_cutoff: Some(10.0),
+            max_rejected_fraction: 0.25,
+            max_iterations: DEFAULT_MAX_ITERATIONS,
+            tolerance: DEFAULT_TOLERANCE,
+            initial_damping: 1e-3,
+            max_damping: 1e10,
+            wgs: None,
+        }
+    }
+}
+
+/// Debug output for [`FitError`]
+///
+/// Written by hand because [`FitResult`] holds an [`Sgp4`], which has no
+/// `Debug`; `NotConverged` prints without its result.
+impl fmt::Debug for FitError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FitError::InvalidObservation { index } => f
+                .debug_struct("InvalidObservation")
+                .field("index", index)
+                .finish(),
+            FitError::InvalidOptions { field } => f
+                .debug_struct("InvalidOptions")
+                .field("field", field)
+                .finish(),
+            FitError::TooFewObservations => f.write_str("TooFewObservations"),
+            FitError::StartingGuessFailed => f.write_str("StartingGuessFailed"),
+            FitError::Sgp4(err) => f.debug_tuple("Sgp4").field(err).finish(),
+            FitError::Underdetermined => f.write_str("Underdetermined"),
+            FitError::NotConverged(_) => f.write_str("NotConverged(..)"),
+        }
+    }
+}
+
+/// Human-readable [`FitError`] messages
+///
+/// Messages start lowercase and have no trailing period, so they compose
+/// into longer messages.
+impl fmt::Display for FitError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FitError::InvalidObservation { index } => write!(
+                f,
+                "observation {index} has a non-finite value, an invalid time, or invalid measurement noise"
+            ),
+            FitError::InvalidOptions { field } => {
+                write!(
+                    f,
+                    "fit option `{field}` is out of range or not a valid date"
+                )
+            }
+            FitError::TooFewObservations => {
+                f.write_str("too few observations: need a full state or 3 distinct position times")
+            }
+            FitError::StartingGuessFailed => f.write_str("no starting guess could be built"),
+            FitError::Sgp4(_) => f.write_str("SGP4 rejected the initial GP set or the epoch"),
+            FitError::Underdetermined => {
+                f.write_str("the observations don't determine every element")
+            }
+            FitError::NotConverged(_) => f.write_str("the fit did not converge"),
+        }
+    }
+}
+
+/// [`FitError`] is a standard error, usable with `?` into `Box<dyn Error>`
+impl core::error::Error for FitError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        match self {
+            FitError::Sgp4(err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
 // ---------
 // Constants
 // ---------
@@ -95,9 +676,383 @@ pub(crate) struct ClassicalElements {
 /// Converts day counts to the minutes SGP4 propagates in.
 const MINUTES_PER_DAY: f64 = 1440.0;
 
+/// Default Jacobian builds per Levenberg-Marquardt run
+///
+/// Provisional; set by the LM convergence tests (implementation step 6).
+const DEFAULT_MAX_ITERATIONS: usize = 25;
+
+/// Default convergence threshold, in units of the step's own one sigma
+///
+/// Provisional; set by the LM convergence tests (implementation step 6).
+const DEFAULT_TOLERANCE: f64 = 1e-3;
+
+/// Smallest allowed outlier cutoff, as a multiple of the median normalized residual
+///
+/// Below about 3 the test starts rejecting good observations.
+const MIN_OUTLIER_CUTOFF: f64 = 3.0;
+
+/// Relative tolerance on the asymmetry of a noise covariance
+///
+/// Entry (i, j) may differ from (j, i) by this times d_i*d_j, where d_i is
+/// the square root of the mean variance of the 3-vector holding component i.
+/// Measuring against each 3-vector's own scale keeps the test fair across
+/// the position and velocity blocks of a state covariance, and passes a
+/// covariance rotated from RIC sigmas into TEME, whose roundoff is about
+/// 1e-16 of the largest variance in its block.
+const SYMMETRY_TOLERANCE: f64 = 1e-12;
+
+/// Diagonal shift for the positive-semidefinite test of a noise covariance
+///
+/// The covariance, scaled as for [`SYMMETRY_TOLERANCE`], plus this times the
+/// identity must have a Cholesky factor, so a singular covariance and one
+/// with a roundoff-sized negative eigenvalue pass.
+const PSD_SHIFT: f64 = 1e-12;
+
 // ---------
 // Functions
 // ---------
+
+/// Build an observation from a time and a measurement
+///
+/// # Arguments
+/// * `datetime` - The observation time
+/// * `measurement` - What was measured at that time
+///
+/// # Returns
+/// * `obs` - The observation
+///
+/// # Examples
+/// ```rust
+/// use mako_sgp4::{CoordinateFrame, DateTime, FitMeasurement, FitPositionNoise, Timezone, new_fit_observation};
+///
+/// // A radar position with 100 m noise at 2024-03-01 12:00:00 UTC
+/// let datetime = DateTime {
+///     year: 2024,
+///     month: 3,
+///     day: 1,
+///     hour: 12,
+///     minute: 0,
+///     second: 0.0,
+///     timezone: Timezone::UTC,
+/// };
+/// let position = FitMeasurement::Position {
+///     frame: CoordinateFrame::TEME,
+///     position: [6778.0, 0.0, 0.0],
+///     noise: Some(FitPositionNoise::Sigma(0.1)),
+/// };
+/// let obs = new_fit_observation(datetime, position);
+///
+/// assert_eq!(obs.measurement, position);
+/// ```
+pub fn new_fit_observation(datetime: DateTime, measurement: FitMeasurement) -> FitObservation {
+    FitObservation {
+        datetime,
+        measurement,
+    }
+}
+
+/// Validate the fit input
+///
+/// Algorithm step 1 of the fit plan: the options, then each observation in
+/// order, then the set as a whole, stopping at the first failure.
+///
+/// # Arguments
+/// * `observations` - The input observations
+/// * `opts` - The fit options
+///
+/// # Returns
+/// * `checked` - One checked observation per input observation, in input order
+///
+/// # Errors
+/// * [`FitError::InvalidOptions`] - If an option is out of range
+/// * [`FitError::InvalidObservation`] - If an observation is invalid
+/// * [`FitError::TooFewObservations`] - If there is no full state and fewer
+///   than 3 distinct position times
+pub(crate) fn validate_input(
+    observations: &[FitObservation],
+    opts: &FitOptions,
+) -> Result<Vec<CheckedObservation>, FitError> {
+    validate_options(opts)?;
+    let checked = observations
+        .iter()
+        .enumerate()
+        .map(|(index, obs)| validate_observation(index, obs))
+        .collect::<Result<Vec<_>, _>>()?;
+    check_observation_count(&checked)?;
+    Ok(checked)
+}
+
+/// Validate the fit options
+///
+/// Checks run in the order the fields are listed in [`FitOptions`], so with
+/// two invalid fields the first is named. The metadata and the Earth model
+/// are not checked.
+///
+/// # Arguments
+/// * `opts` - The fit options
+///
+/// # Returns
+/// * `()` - If every option is in range
+///
+/// # Errors
+/// * [`FitError::InvalidOptions`] - Naming the first invalid field.
+///   `initial_damping` at or above `max_damping` names `max_damping`
+pub(crate) fn validate_options(opts: &FitOptions) -> Result<(), FitError> {
+    let fraction = opts.max_rejected_fraction;
+    let checks: [(bool, &'static str); 10] = [
+        (!is_positive(opts.bstar_prior_width), "bstar_prior_width"),
+        (
+            opts.bstar_prior_center.is_some_and(|c| !c.is_finite()),
+            "bstar_prior_center",
+        ),
+        (
+            opts.outlier_cutoff
+                .is_some_and(|c| !c.is_finite() || c < MIN_OUTLIER_CUTOFF),
+            "outlier_cutoff",
+        ),
+        (
+            !fraction.is_finite() || fraction <= 0.0 || fraction >= 0.5,
+            "max_rejected_fraction",
+        ),
+        (opts.max_iterations == 0, "max_iterations"),
+        (!is_positive(opts.tolerance), "tolerance"),
+        (!is_positive(opts.initial_damping), "initial_damping"),
+        (!is_positive(opts.max_damping), "max_damping"),
+        (opts.initial_damping >= opts.max_damping, "max_damping"),
+        (
+            opts.epoch
+                .as_ref()
+                .is_some_and(|e| julian_date(e).is_none()),
+            "epoch",
+        ),
+    ];
+    match checks.iter().find(|(failed, _)| *failed) {
+        Some((_, field)) => Err(FitError::InvalidOptions { field }),
+        None => Ok(()),
+    }
+}
+
+/// Validate one observation
+///
+/// The time must convert to a Julian date, the position and any velocity
+/// must be finite, and any measurement noise must pass
+/// [`checked_variance`] or [`checked_covariance`]. There is no range check on
+/// magnitudes. The measurement is matched on its frame and the time on its
+/// time scale exhaustively, so a new frame or scale forces a conversion
+/// decision here.
+///
+/// # Arguments
+/// * `index` - The observation's input index, reported on failure
+/// * `obs` - The observation
+///
+/// # Returns
+/// * `checked` - The time as a split Julian date and the TEME measurement,
+///   with its noise as a symmetrized covariance (all zero without noise)
+///
+/// # Errors
+/// * [`FitError::InvalidObservation`] - With `index`, if any check fails
+pub(crate) fn validate_observation(
+    index: usize,
+    obs: &FitObservation,
+) -> Result<CheckedObservation, FitError> {
+    let invalid = || FitError::InvalidObservation { index };
+    let time = julian_date(&obs.datetime).ok_or_else(invalid)?;
+    let measurement = match obs.measurement {
+        FitMeasurement::State {
+            frame,
+            position,
+            velocity,
+            noise,
+        } => {
+            let (position, velocity) = match frame {
+                CoordinateFrame::TEME => (position, velocity),
+            };
+            if !all_finite(&position) || !all_finite(&velocity) {
+                return Err(invalid());
+            }
+            let noise = match noise {
+                None => [[0.0; 6]; 6],
+                Some(FitStateNoise::Sigmas {
+                    position: sigma_r,
+                    velocity: sigma_v,
+                }) => {
+                    let var_r = checked_variance(sigma_r).ok_or_else(invalid)?;
+                    let var_v = checked_variance(sigma_v).ok_or_else(invalid)?;
+                    diagonal(core::array::from_fn(|i| if i < 3 { var_r } else { var_v }))
+                }
+                Some(FitStateNoise::Covariance(cov)) => {
+                    checked_covariance(&cov).ok_or_else(invalid)?
+                }
+            };
+            CheckedMeasurement::State {
+                position,
+                velocity,
+                noise,
+            }
+        }
+        FitMeasurement::Position {
+            frame,
+            position,
+            noise,
+        } => {
+            let position = match frame {
+                CoordinateFrame::TEME => position,
+            };
+            if !all_finite(&position) {
+                return Err(invalid());
+            }
+            let noise = match noise {
+                None => [[0.0; 3]; 3],
+                Some(FitPositionNoise::Sigma(sigma)) => {
+                    diagonal([checked_variance(sigma).ok_or_else(invalid)?; 3])
+                }
+                Some(FitPositionNoise::Covariance(cov)) => {
+                    checked_covariance(&cov).ok_or_else(invalid)?
+                }
+            };
+            CheckedMeasurement::Position { position, noise }
+        }
+    };
+    Ok(CheckedObservation { time, measurement })
+}
+
+/// Check that the observations can support a fit
+///
+/// A fit needs at least one full state or 3 distinct position times; with
+/// the B* prior row that always gives at least 7 rows. Positions at the same
+/// time count once.
+///
+/// # Arguments
+/// * `observations` - The checked observations
+///
+/// # Returns
+/// * `()` - If there are enough observations
+///
+/// # Errors
+/// * [`FitError::TooFewObservations`] - If there is no full state and fewer
+///   than 3 distinct position times
+pub(crate) fn check_observation_count(observations: &[CheckedObservation]) -> Result<(), FitError> {
+    let mut distinct = [(0.0, 0.0); 3];
+    let mut count = 0;
+    for obs in observations {
+        match obs.measurement {
+            CheckedMeasurement::State { .. } => return Ok(()),
+            CheckedMeasurement::Position { .. } => {
+                let seen = distinct[..count]
+                    .iter()
+                    .any(|t| minutes_since_epoch(*t, obs.time) == 0.0);
+                if !seen && count < 3 {
+                    distinct[count] = obs.time;
+                    count += 1;
+                }
+            }
+        }
+    }
+    if count == 3 {
+        Ok(())
+    } else {
+        Err(FitError::TooFewObservations)
+    }
+}
+
+/// Variance of a measurement-noise sigma
+///
+/// # Arguments
+/// * `sigma` - The one-sigma noise
+///
+/// # Returns
+/// * `Some(variance)` - sigma^2, if sigma is finite, at least 0, and its
+///   square is finite
+/// * `None` - Otherwise
+pub(crate) fn checked_variance(sigma: f64) -> Option<f64> {
+    let variance = sigma * sigma;
+    (sigma.is_finite() && sigma >= 0.0 && variance.is_finite()).then_some(variance)
+}
+
+/// Check and symmetrize a measurement-noise covariance
+///
+/// The matrix holds one or two 3-vectors (a position, or a position then a
+/// velocity). Each component i gets the scale d_i, the square root of the
+/// mean variance of its 3-vector, so the position and velocity blocks of a
+/// state covariance are each judged in their own units. The matrix must be
+/// finite, have a non-negative mean variance in each block, be symmetric to
+/// [`SYMMETRY_TOLERANCE`] times d_i*d_j, and, after symmetrizing and scaling
+/// each entry by 1/(d_i*d_j), be positive definite once [`PSD_SHIFT`] is
+/// added to the diagonal. A block with zero scale must be exactly zero,
+/// including its correlations, and then counts as no noise; an all-zero
+/// matrix is accepted.
+///
+/// # Arguments
+/// * `cov` - The covariance \[N x N\], with N = 3 or 6
+///
+/// # Returns
+/// * `Some(sym)` - The symmetrized covariance
+/// * `None` - If any check fails
+///
+/// # Panics
+/// * If N is not a multiple of 3
+pub(crate) fn checked_covariance<const N: usize>(cov: &[[f64; N]; N]) -> Option<[[f64; N]; N]> {
+    assert!(N % 3 == 0, "covariance size must be a multiple of 3");
+    if cov.iter().flatten().any(|x| !x.is_finite()) {
+        return None;
+    }
+
+    // Scale of each component: the root mean variance of its 3-vector
+    let mut scale = [0.0; N];
+    for (i, s) in scale.iter_mut().enumerate() {
+        let b = 3 * (i / 3);
+        let mean = cov[b][b] / 3.0 + cov[b + 1][b + 1] / 3.0 + cov[b + 2][b + 2] / 3.0;
+        if mean < 0.0 {
+            return None;
+        }
+        *s = sqrt(mean);
+    }
+
+    // Symmetric to roundoff, then symmetrized and scaled
+    let mut sym = [[0.0; N]; N];
+    let mut scaled = [[0.0; N]; N];
+    for i in 0..N {
+        for j in 0..N {
+            let limit = SYMMETRY_TOLERANCE * scale[i] * scale[j];
+            if abs(cov[i][j] - cov[j][i]) > limit {
+                return None;
+            }
+            sym[i][j] = 0.5 * cov[i][j] + 0.5 * cov[j][i];
+            scaled[i][j] = if scale[i] > 0.0 && scale[j] > 0.0 {
+                sym[i][j] / (scale[i] * scale[j])
+            } else if sym[i][j] != 0.0 {
+                // A zero-scale block must have no variance and no correlation
+                return None;
+            } else if i == j {
+                1.0
+            } else {
+                0.0
+            };
+        }
+        scaled[i][i] += PSD_SHIFT;
+    }
+
+    // Positive semidefinite up to the shift
+    cholesky(&scaled)?;
+    Some(sym)
+}
+
+/// Convert a time to a split Julian date
+///
+/// Matches on the time scale exhaustively, so adding a scale forces a
+/// conversion decision here.
+///
+/// # Arguments
+/// * `datetime` - The time
+///
+/// # Returns
+/// * `Some((jd, frac))` - The Julian day and day fraction from [`crate::utc2jday`]
+/// * `None` - If the time is not a valid date
+pub(crate) fn julian_date(datetime: &DateTime) -> Option<(f64, f64)> {
+    match datetime.timezone {
+        Timezone::UTC => utc2jday(datetime).ok(),
+    }
+}
 
 /// Retrograde factor for an inclination
 ///
@@ -411,6 +1366,39 @@ pub(crate) fn fit_epoch(
 fn wrap_degrees(angle: f64) -> f64 {
     let wrapped = rem_euclid(angle, 360.0);
     if wrapped >= 360.0 { 0.0 } else { wrapped }
+}
+
+/// Whether a value is finite and positive
+///
+/// # Arguments
+/// * `x` - The value
+///
+/// # Returns
+/// * `positive` - True if x is finite and above 0
+fn is_positive(x: f64) -> bool {
+    x.is_finite() && x > 0.0
+}
+
+/// Whether every component of a 3-vector is finite
+///
+/// # Arguments
+/// * `a` - The vector
+///
+/// # Returns
+/// * `finite` - True if no component is NaN or infinite
+fn all_finite(a: &[f64; 3]) -> bool {
+    a.iter().all(|x| x.is_finite())
+}
+
+/// Diagonal matrix from its diagonal
+///
+/// # Arguments
+/// * `d` - The diagonal entries
+///
+/// # Returns
+/// * `m` - The N x N matrix with `d` on the diagonal and zeros elsewhere
+fn diagonal<const N: usize>(d: [f64; N]) -> [[f64; N]; N] {
+    core::array::from_fn(|i| core::array::from_fn(|j| if i == j { d[i] } else { 0.0 }))
 }
 
 /// Dot product of two 3-vectors
@@ -885,5 +1873,540 @@ mod tests {
         // No observations and no user epoch
         assert!(fit_epoch(&[], None).is_none());
         assert!(fit_epoch(&[], Some(&user)).is_some());
+    }
+
+    /// A UTC time on 2024-03-01 during the 12:00 hour
+    ///
+    /// # Arguments
+    /// * `minute` - The minute
+    /// * `second` - The second
+    ///
+    /// # Returns
+    /// * `datetime` - The time
+    fn time_at(minute: i32, second: f64) -> DateTime {
+        DateTime {
+            year: 2024,
+            month: 3,
+            day: 1,
+            hour: 12,
+            minute,
+            second,
+            timezone: Timezone::UTC,
+        }
+    }
+
+    /// A LEO-like TEME state observation with the given noise
+    ///
+    /// # Arguments
+    /// * `minute` - The minute of the observation time
+    /// * `noise` - The measurement noise
+    ///
+    /// # Returns
+    /// * `obs` - The observation
+    fn state_at(minute: i32, noise: Option<FitStateNoise>) -> FitObservation {
+        new_fit_observation(
+            time_at(minute, 0.0),
+            FitMeasurement::State {
+                frame: CoordinateFrame::TEME,
+                position: [6778.0, 0.0, 0.0],
+                velocity: [0.0, 4.8, 5.9],
+                noise,
+            },
+        )
+    }
+
+    /// A LEO-like TEME position observation with the given noise
+    ///
+    /// # Arguments
+    /// * `minute` - The minute of the observation time
+    /// * `noise` - The measurement noise
+    ///
+    /// # Returns
+    /// * `obs` - The observation
+    fn position_at(minute: i32, noise: Option<FitPositionNoise>) -> FitObservation {
+        new_fit_observation(
+            time_at(minute, 0.0),
+            FitMeasurement::Position {
+                frame: CoordinateFrame::TEME,
+                position: [6778.0, 0.0, 0.0],
+                noise,
+            },
+        )
+    }
+
+    /// A rotation matrix from three angles
+    ///
+    /// # Arguments
+    /// * `a` - Rotation about z \[rad\]
+    /// * `b` - Rotation about x \[rad\]
+    /// * `c` - Rotation about z \[rad\]
+    ///
+    /// # Returns
+    /// * `rot` - Rz(a)*Rx(b)*Rz(c)
+    fn rotation(a: f64, b: f64, c: f64) -> [[f64; 3]; 3] {
+        let (ca, sa, cb, sb, cc, sc) = (cos(a), sin(a), cos(b), sin(b), cos(c), sin(c));
+        [
+            [ca * cc - sa * cb * sc, -ca * sc - sa * cb * cc, sa * sb],
+            [sa * cc + ca * cb * sc, -sa * sc + ca * cb * cc, -ca * sb],
+            [sb * sc, sb * cc, cb],
+        ]
+    }
+
+    /// Rotate a diagonal covariance: rot * diag(variances) * rot^T
+    ///
+    /// # Arguments
+    /// * `rot` - The rotation matrix
+    /// * `variances` - The variances along the rotated axes
+    ///
+    /// # Returns
+    /// * `cov` - The rotated covariance, symmetric only to roundoff
+    fn rotate_covariance(rot: &[[f64; 3]; 3], variances: [f64; 3]) -> [[f64; 3]; 3] {
+        core::array::from_fn(|i| {
+            core::array::from_fn(|j| (0..3).map(|k| rot[i][k] * variances[k] * rot[j][k]).sum())
+        })
+    }
+
+    /// The default options have the documented values and validate
+    ///
+    /// # Panics
+    /// * If a default differs from the plan or fails validation
+    #[test]
+    fn test_default_options() {
+        let opts = FitOptions::default();
+        assert!(opts.epoch.is_none());
+        assert!(opts.initial_guess.is_none());
+        assert_eq!(opts.metadata, GpMetadata::default());
+        assert_eq!(opts.metadata.name, None);
+        assert_eq!(opts.bstar_prior_center, None);
+        assert_eq!(opts.bstar_prior_width, 1e-2);
+        assert_eq!(opts.outlier_cutoff, Some(10.0));
+        assert_eq!(opts.max_rejected_fraction, 0.25);
+        assert!(opts.max_iterations >= 1);
+        assert_eq!(opts.tolerance, 1e-3);
+        assert_eq!(opts.initial_damping, 1e-3);
+        assert_eq!(opts.max_damping, 1e10);
+        assert!(opts.wgs.is_none());
+        assert!(validate_options(&opts).is_ok());
+    }
+
+    /// Each out-of-range option is named, and the first in order wins
+    ///
+    /// # Panics
+    /// * If an invalid option passes or the wrong field is named
+    #[test]
+    fn test_invalid_options() {
+        type Mutate = fn(&mut FitOptions);
+        let cases: [(Mutate, &str); 25] = [
+            (|o| o.bstar_prior_width = 0.0, "bstar_prior_width"),
+            (|o| o.bstar_prior_width = -1e-3, "bstar_prior_width"),
+            (|o| o.bstar_prior_width = f64::NAN, "bstar_prior_width"),
+            (|o| o.bstar_prior_width = f64::INFINITY, "bstar_prior_width"),
+            (
+                |o| o.bstar_prior_center = Some(f64::NAN),
+                "bstar_prior_center",
+            ),
+            (
+                |o| o.bstar_prior_center = Some(f64::NEG_INFINITY),
+                "bstar_prior_center",
+            ),
+            (|o| o.outlier_cutoff = Some(2.99), "outlier_cutoff"),
+            (|o| o.outlier_cutoff = Some(f64::NAN), "outlier_cutoff"),
+            (|o| o.outlier_cutoff = Some(f64::INFINITY), "outlier_cutoff"),
+            (|o| o.max_rejected_fraction = 0.0, "max_rejected_fraction"),
+            (|o| o.max_rejected_fraction = 0.5, "max_rejected_fraction"),
+            (
+                |o| o.max_rejected_fraction = f64::NAN,
+                "max_rejected_fraction",
+            ),
+            (|o| o.max_iterations = 0, "max_iterations"),
+            (|o| o.tolerance = 0.0, "tolerance"),
+            (|o| o.tolerance = f64::INFINITY, "tolerance"),
+            (|o| o.initial_damping = 0.0, "initial_damping"),
+            (|o| o.initial_damping = f64::NAN, "initial_damping"),
+            (|o| o.max_damping = -1.0, "max_damping"),
+            (|o| o.max_damping = f64::INFINITY, "max_damping"),
+            (|o| o.initial_damping = 1e10, "max_damping"),
+            (|o| o.initial_damping = 1e11, "max_damping"),
+            (|o| o.epoch = Some(time_at(60, 0.0)), "epoch"),
+            (|o| o.epoch = Some(time_at(0, 61.0)), "epoch"),
+            (
+                |o| {
+                    let mut early = time_at(0, 0.0);
+                    early.year = 1500;
+                    o.epoch = Some(early)
+                },
+                "epoch",
+            ),
+            (
+                |o| {
+                    o.bstar_prior_width = 0.0;
+                    o.epoch = Some(time_at(60, 0.0))
+                },
+                "bstar_prior_width",
+            ),
+        ];
+        for (mutate, expected) in cases {
+            let mut opts = FitOptions::default();
+            mutate(&mut opts);
+            match validate_options(&opts) {
+                Err(FitError::InvalidOptions { field }) => assert_eq!(field, expected),
+                other => panic!("{expected}: got {other:?}"),
+            }
+        }
+
+        // Legal edge values pass: negative B*, the minimum cutoff, rejection off
+        let mut opts = FitOptions {
+            bstar_prior_center: Some(-1e-3),
+            outlier_cutoff: Some(3.0),
+            max_rejected_fraction: 0.499,
+            max_iterations: 1,
+            epoch: Some(time_at(0, 60.5)),
+            ..FitOptions::default()
+        };
+        assert!(validate_options(&opts).is_ok());
+        opts.outlier_cutoff = None;
+        assert!(validate_options(&opts).is_ok());
+    }
+
+    /// Invalid values, times and noise give `InvalidObservation` with the right index
+    ///
+    /// # Panics
+    /// * If an invalid observation passes or the wrong index is reported
+    #[test]
+    fn test_invalid_observation() {
+        let nan = f64::NAN;
+        let mut bad: Vec<FitObservation> = Vec::new();
+
+        // Non-finite position or velocity
+        let mut obs = state_at(0, None);
+        if let FitMeasurement::State { position, .. } = &mut obs.measurement {
+            position[1] = nan;
+        }
+        bad.push(obs);
+        let mut obs = state_at(0, None);
+        if let FitMeasurement::State { velocity, .. } = &mut obs.measurement {
+            velocity[2] = f64::INFINITY;
+        }
+        bad.push(obs);
+        let mut obs = position_at(0, None);
+        if let FitMeasurement::Position { position, .. } = &mut obs.measurement {
+            position[0] = f64::NEG_INFINITY;
+        }
+        bad.push(obs);
+
+        // Invalid times: month 13, second 61, NaN second, before the Gregorian calendar
+        for change in [
+            |t: &mut DateTime| t.month = 13,
+            |t: &mut DateTime| t.second = 61.0,
+            |t: &mut DateTime| t.second = f64::NAN,
+            |t: &mut DateTime| t.year = 1500,
+        ] {
+            let mut obs = position_at(0, None);
+            change(&mut obs.datetime);
+            bad.push(obs);
+        }
+
+        // Invalid sigmas: negative, NaN, infinite, and one whose square overflows
+        for sigma in [-1e-3, nan, f64::INFINITY, 1e200] {
+            bad.push(position_at(0, Some(FitPositionNoise::Sigma(sigma))));
+            bad.push(state_at(
+                0,
+                Some(FitStateNoise::Sigmas {
+                    position: 0.01,
+                    velocity: sigma,
+                }),
+            ));
+            bad.push(state_at(
+                0,
+                Some(FitStateNoise::Sigmas {
+                    position: sigma,
+                    velocity: 1e-5,
+                }),
+            ));
+        }
+
+        // Invalid position covariances: non-finite, asymmetric beyond the
+        // tolerance, a negative eigenvalue, and a zero block with a nonzero
+        // entry
+        let id = diagonal([1.0; 3]);
+        let mut non_finite = id;
+        non_finite[0][2] = nan;
+        let mut asymmetric = id;
+        asymmetric[0][1] = 1e-9;
+        let indefinite = [[1.0, 2.0, 0.0], [2.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let cancelling = diagonal([1.0, -1.0, 0.0]);
+        for cov in [
+            non_finite,
+            asymmetric,
+            indefinite,
+            cancelling,
+            diagonal([-1.0; 3]),
+        ] {
+            bad.push(position_at(0, Some(FitPositionNoise::Covariance(cov))));
+        }
+
+        // Invalid state covariances. A negative eigenvalue confined to the
+        // velocity block is caught although it is tiny beside the position
+        // variances; a shift by the whole trace would hide it
+        let mut velocity_indefinite = diagonal([1.0, 1.0, 1.0, 1e-6, 1e-6, -1e-12]);
+        velocity_indefinite[3][4] = 0.0;
+        let mut zero_velocity_correlated = diagonal([1.0, 1.0, 1.0, 0.0, 0.0, 0.0]);
+        zero_velocity_correlated[0][3] = 1e-3;
+        zero_velocity_correlated[3][0] = 1e-3;
+        let mut rv_asymmetric = diagonal([1.0, 1.0, 1.0, 1e-6, 1e-6, 1e-6]);
+        rv_asymmetric[1][4] = 1e-4;
+        rv_asymmetric[4][1] = 1e-4 + 1e-14;
+        for cov in [velocity_indefinite, zero_velocity_correlated, rv_asymmetric] {
+            bad.push(state_at(0, Some(FitStateNoise::Covariance(cov))));
+        }
+
+        // Each bad observation, placed second, is reported at index 1
+        for (case, obs) in bad.iter().enumerate() {
+            let observations = [state_at(1, None), *obs, state_at(2, None)];
+            match validate_input(&observations, &FitOptions::default()) {
+                Err(FitError::InvalidObservation { index }) => assert_eq!(index, 1, "case {case}"),
+                other => panic!("case {case}: got {other:?}"),
+            }
+        }
+    }
+
+    /// Valid noise forms are accepted, symmetrized and equal where equivalent
+    ///
+    /// # Panics
+    /// * If valid noise is rejected or equivalent forms differ
+    #[test]
+    fn test_noise_accepted() {
+        let checked_noise = |obs: &FitObservation| -> CheckedMeasurement {
+            validate_observation(0, obs).expect("valid").measurement
+        };
+
+        // A sigma of 0 and an all-zero covariance equal no noise
+        let none = checked_noise(&position_at(0, None));
+        assert_eq!(
+            none,
+            checked_noise(&position_at(0, Some(FitPositionNoise::Sigma(0.0))))
+        );
+        assert_eq!(
+            none,
+            checked_noise(&position_at(
+                0,
+                Some(FitPositionNoise::Covariance([[0.0; 3]; 3]))
+            ))
+        );
+        let none = checked_noise(&state_at(0, None));
+        let zero_sigmas = FitStateNoise::Sigmas {
+            position: 0.0,
+            velocity: -0.0,
+        };
+        assert_eq!(none, checked_noise(&state_at(0, Some(zero_sigmas))));
+
+        // A diagonal covariance equals the sigma form
+        assert_eq!(
+            checked_noise(&position_at(0, Some(FitPositionNoise::Sigma(0.1)))),
+            checked_noise(&position_at(
+                0,
+                Some(FitPositionNoise::Covariance(diagonal([0.1 * 0.1; 3])))
+            ))
+        );
+        let sigmas = FitStateNoise::Sigmas {
+            position: 0.01,
+            velocity: 1e-5,
+        };
+        let diag = FitStateNoise::Covariance(diagonal(core::array::from_fn(|i| {
+            if i < 3 { 0.01 * 0.01 } else { 1e-5 * 1e-5 }
+        })));
+        assert_eq!(
+            checked_noise(&state_at(0, Some(sigmas))),
+            checked_noise(&state_at(0, Some(diag)))
+        );
+
+        // Rotated from RIC sigmas into TEME: anisotropic (10 m against 10 km)
+        // and singular (one zero sigma), asymmetric at roundoff. Both pass and
+        // come back exactly symmetric
+        let rot = rotation(0.7, 1.1, -2.3);
+        for variances in [[1e-4, 100.0, 100.0], [0.0, 1.0, 1.0], [0.0, 0.0, 4.0]] {
+            let cov = rotate_covariance(&rot, variances);
+            let CheckedMeasurement::Position { noise, .. } =
+                checked_noise(&position_at(0, Some(FitPositionNoise::Covariance(cov))))
+            else {
+                panic!("expected a position")
+            };
+            for i in 0..3 {
+                for j in 0..3 {
+                    assert_eq!(noise[i][j], noise[j][i]);
+                    assert!(abs(noise[i][j] - cov[i][j]) <= 1e-15 * 100.0);
+                }
+            }
+        }
+
+        // A state covariance with position-velocity correlation, the velocity
+        // block in its own units, and a zero velocity block
+        let mut correlated = diagonal([1.0, 1.0, 1.0, 1e-6, 1e-6, 1e-6]);
+        correlated[0][3] = 0.9e-3;
+        correlated[3][0] = 0.9e-3;
+        let zero_velocity = diagonal([1.0, 1.0, 1.0, 0.0, 0.0, 0.0]);
+        for cov in [correlated, zero_velocity] {
+            let CheckedMeasurement::State { noise, .. } =
+                checked_noise(&state_at(0, Some(FitStateNoise::Covariance(cov))))
+            else {
+                panic!("expected a state")
+            };
+            assert_eq!(noise, cov);
+        }
+    }
+
+    /// The set needs a full state or 3 distinct position times
+    ///
+    /// # Panics
+    /// * If a set with too few observations passes or a sufficient one fails
+    #[test]
+    fn test_too_few_observations() {
+        let too_few: [&[FitObservation]; 4] = [
+            &[],
+            &[position_at(0, None), position_at(1, None)],
+            &[
+                position_at(0, None),
+                position_at(0, None),
+                position_at(0, None),
+            ],
+            &[
+                position_at(0, None),
+                position_at(1, None),
+                position_at(0, None),
+            ],
+        ];
+        for (case, observations) in too_few.iter().enumerate() {
+            assert!(
+                matches!(
+                    validate_input(observations, &FitOptions::default()),
+                    Err(FitError::TooFewObservations)
+                ),
+                "case {case}"
+            );
+        }
+
+        let enough: [&[FitObservation]; 5] = [
+            &[state_at(0, None)],
+            &[
+                position_at(0, None),
+                position_at(1, None),
+                position_at(2, None),
+            ],
+            &[
+                position_at(0, None),
+                position_at(0, None),
+                position_at(1, None),
+                position_at(2, None),
+            ],
+            &[state_at(0, None), position_at(1, None)],
+            &[state_at(0, None), state_at(0, None)],
+        ];
+        for (case, observations) in enough.iter().enumerate() {
+            let checked = validate_input(observations, &FitOptions::default()).expect("enough");
+            assert_eq!(checked.len(), observations.len(), "case {case}");
+        }
+
+        // Positions 1 microsecond apart are distinct times
+        let mut close = [
+            position_at(0, None),
+            position_at(0, None),
+            position_at(0, None),
+        ];
+        close[1].datetime.second = 1e-6;
+        close[2].datetime.second = 2e-6;
+        assert!(validate_input(&close, &FitOptions::default()).is_ok());
+
+        // Options are checked first, then observations, then the count
+        let opts = FitOptions {
+            max_iterations: 0,
+            ..FitOptions::default()
+        };
+        assert!(matches!(
+            validate_input(&[], &opts),
+            Err(FitError::InvalidOptions {
+                field: "max_iterations"
+            })
+        ));
+        let mut invalid = position_at(0, None);
+        invalid.datetime.month = 0;
+        assert!(matches!(
+            validate_input(&[invalid], &FitOptions::default()),
+            Err(FitError::InvalidObservation { index: 0 })
+        ));
+    }
+
+    /// A mixed list of measurement kinds validates in input order, values kept
+    ///
+    /// # Panics
+    /// * If a kind, value, time or the order is not kept
+    #[test]
+    fn test_mixed_measurements() {
+        let sigma = FitPositionNoise::Sigma(0.1);
+        let observations = [
+            position_at(3, Some(sigma)),
+            state_at(1, None),
+            position_at(2, None),
+        ];
+        let checked = validate_input(&observations, &FitOptions::default()).expect("valid");
+
+        assert_eq!(checked.len(), 3);
+        for (obs, check) in observations.iter().zip(&checked) {
+            assert_eq!(check.time, utc2jday(&obs.datetime).unwrap());
+        }
+        assert_eq!(
+            checked[0].measurement,
+            CheckedMeasurement::Position {
+                position: [6778.0, 0.0, 0.0],
+                noise: diagonal([0.1 * 0.1; 3]),
+            }
+        );
+        assert_eq!(
+            checked[1].measurement,
+            CheckedMeasurement::State {
+                position: [6778.0, 0.0, 0.0],
+                velocity: [0.0, 4.8, 5.9],
+                noise: [[0.0; 6]; 6],
+            }
+        );
+        assert!(matches!(
+            checked[2].measurement,
+            CheckedMeasurement::Position { .. }
+        ));
+    }
+
+    /// Error messages, the hand-written Debug and the error source
+    ///
+    /// # Panics
+    /// * If a message, Debug output or source is wrong
+    #[test]
+    fn test_fit_error_traits() {
+        use alloc::format;
+        use alloc::string::ToString;
+        use core::error::Error;
+
+        let err = FitError::InvalidObservation { index: 4 };
+        assert!(err.to_string().starts_with("observation 4 "));
+        assert_eq!(format!("{err:?}"), "InvalidObservation { index: 4 }");
+        assert!(err.source().is_none());
+
+        let err = FitError::InvalidOptions { field: "epoch" };
+        assert!(err.to_string().contains("`epoch`"));
+
+        let err = FitError::Sgp4(Sgp4Error::SatelliteDecayed);
+        assert_eq!(format!("{err:?}"), "Sgp4(SatelliteDecayed)");
+        assert!(err.source().is_some());
+
+        for err in [
+            FitError::TooFewObservations,
+            FitError::StartingGuessFailed,
+            FitError::Underdetermined,
+        ] {
+            let message = err.to_string();
+            assert!(
+                message.starts_with(|c: char| c.is_ascii_lowercase()),
+                "{message}"
+            );
+            assert!(!message.ends_with('.'), "{message}");
+        }
     }
 }
